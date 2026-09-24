@@ -181,6 +181,58 @@ class Settings(BaseSettings):
     #: read-only tools are governed by agent_enabled alone.
     agent_write_enabled: bool = False
 
+    # -- Document ingestion (Phase 6, docs/PHASE6_PLAN.md) ------------------
+    # Kill switch, same pattern as EXTRACTION_ENABLED/AGENT_ENABLED.
+    document_ingestion_enabled: bool = True
+    #: "local" is the only real backend in v1 (zero-cost constraint) --
+    #: PHASE6_PLAN.md section 10. No S3-compatible provider ships yet.
+    document_storage_provider: str = "local"
+    #: Root directory LocalDocumentStorage writes under. Never a path derived
+    #: from user input (section 9) -- documents are keyed by a generated id.
+    document_storage_dir: str = "./data/documents"
+    max_document_size_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
+    max_document_pages: int = Field(default=200, ge=1, le=2000)
+    max_chunks_per_document: int = Field(default=500, ge=1, le=5000)
+    ingestion_parse_timeout_seconds: float = Field(default=60.0, gt=0)
+    ingestion_sweep_batch_size: int = Field(default=20, ge=1, le=500)
+    ingestion_lease_seconds: int = Field(default=600, ge=30)
+    ingestion_max_attempts: int = Field(default=3, ge=1, le=10)
+    #: Chunking (PHASE6_PLAN.md section 6) -- tunable, not a magic number,
+    #: same convention as EXTRACTION_WINDOW_SIZE.
+    document_chunk_size_chars: int = Field(default=2000, ge=200, le=20_000)
+    document_chunk_overlap_chars: int = Field(default=200, ge=0, le=5_000)
+    #: A chunk beyond a majority of pages repeating it is a running
+    #: header/footer, stripped before chunking (section 5).
+    document_header_footer_repetition_threshold: float = Field(default=0.5, gt=0.0, le=1.0)
+    #: Below this extracted-characters-per-page floor, a PDF is treated as
+    #: having no usable text layer (a scanned/image-only PDF) and fails
+    #: PARSING explicitly rather than producing near-empty chunks.
+    document_min_text_chars_per_page: int = Field(default=20, ge=0)
+    document_extraction_prompt_version: str = "v1"
+
+    @model_validator(mode="after")
+    def _check_document_storage_provider(self) -> Settings:
+        if self.document_storage_provider not in {"local"}:
+            raise ValueError(
+                f"DOCUMENT_STORAGE_PROVIDER must be 'local' in this phase "
+                f"(zero-cost constraint, docs/PHASE6_PLAN.md section 10), "
+                f"got {self.document_storage_provider!r}"
+            )
+        return self
+
+    @property
+    def document_extractor_version(self) -> str:
+        """Idempotency key component for document-sourced extraction jobs --
+        namespaced away from `extractor_version` (conversation jobs) by the
+        `document:` prefix, so the two pipelines can never collide on the
+        same `(target, extractor_version)` unique key even if they otherwise
+        shared every component (PHASE6_PLAN.md section 3/7).
+        """
+        return (
+            f"document:{self.llm_provider}:{self.llm_model or 'default'}:"
+            f"{self.document_extraction_prompt_version}"
+        )
+
     # -- Internal operations -----------------------------------------------
     # Guards POST /internal/extraction/sweep and POST /internal/embeddings/backfill,
     # neither of which is user-scoped.
@@ -214,8 +266,7 @@ class Settings(BaseSettings):
             )
         if self.llm_provider not in _KNOWN_PROVIDERS:
             raise ValueError(
-                f"LLM_PROVIDER must be one of {sorted(_KNOWN_PROVIDERS)}, "
-                f"got {self.llm_provider!r}"
+                f"LLM_PROVIDER must be one of {sorted(_KNOWN_PROVIDERS)}, got {self.llm_provider!r}"
             )
         if self.embedding_provider not in _KNOWN_EMBEDDING_PROVIDERS:
             raise ValueError(

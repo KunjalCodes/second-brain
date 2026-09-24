@@ -59,8 +59,10 @@ from app.extraction.resolution import is_plausible_duplicate
 from app.extraction.trigger import maybe_trigger_extraction
 from app.graph.connection import GraphClient
 from app.llm.base import LLMClient
+from app.llm.prompts.document_extraction_v1 import build_document_extraction_prompt
 from app.llm.prompts.extraction_v1 import build_extraction_prompt
 from app.models.conversation import ExtractionStatus, Message
+from app.models.document import DocumentChunk, DocumentStatus, format_chunk_source_location
 from app.models.domain import Entity
 from app.models.enums import Direction, MemoryStatus, SourceType
 from app.models.extraction import (
@@ -69,8 +71,10 @@ from app.models.extraction import (
     DecisionType,
     ExtractionJob,
     ExtractionResult,
+    ExtractionSourceKind,
 )
 from app.models.normalization import normalize_name
+from app.repositories.document_repository import DocumentChunkRepository, DocumentRepository
 from app.repositories.embedding_repository import EmbeddingRepository
 from app.repositories.entity_merge_repository import EntityMergeCandidateRepository
 from app.repositories.entity_repository import EntityRepository
@@ -197,33 +201,73 @@ class ExtractionRunner:
             MemoryRepository(self._graph), now_fn=self._now, id_fn=self._new_id
         )
         retrieval_service = RetrievalService(
-            EntityRepository(self._graph), max_hops=self._settings.graph_max_hops,
+            EntityRepository(self._graph),
+            max_hops=self._settings.graph_max_hops,
             now_fn=self._now,
         )
 
-        try:
-            async with db.session() as session:
-                window = await MessageRepository(
-                    session, user_id=job.user_id
-                ).list_by_sequence_range(
-                    conversation_id=job.conversation_id,
-                    start_sequence=job.window_start_sequence,
-                    end_sequence=job.window_end_sequence,
-                )
-            target = next((m for m in window if m.id == job.target_message_id), None)
-            if target is None:
-                async with db.session() as session:
-                    await ExtractionQueue(session).mark_failed(
-                        job_id=job.id,
-                        error_code="target_message_missing",
-                        error_detail="the job's target message was not found in its own window",
-                        permanent=True,
-                        next_attempt_at=None,
-                        now=now,
-                    )
-                return
+        is_document_job = job.source_kind is ExtractionSourceKind.DOCUMENT_CHUNK
 
-            result = await self._extract(window=window, target_message_id=job.target_message_id)
+        try:
+            if is_document_job:
+                async with db.session() as session:
+                    window = await DocumentChunkRepository(
+                        session, user_id=job.user_id
+                    ).list_by_ordinal_range(
+                        document_id=job.document_id,
+                        start_ordinal=job.window_start_sequence,
+                        end_ordinal=job.window_end_sequence,
+                    )
+                target = next((c for c in window if c.id == job.target_chunk_id), None)
+                if target is None:
+                    async with db.session() as session:
+                        await ExtractionQueue(session).mark_failed(
+                            job_id=job.id,
+                            error_code="target_chunk_missing",
+                            error_detail="the job's target chunk was not found in its own window",
+                            permanent=True,
+                            next_attempt_at=None,
+                            now=now,
+                        )
+                    return
+                source_type = SourceType.DOCUMENT
+                source_reference = job.document_id
+                # `reference` alone (the document id) cannot pinpoint which
+                # chunk a memory came from -- unlike a message id, which is
+                # already unique. Threaded through `_persist` into `Source.
+                # location` alongside the usual char-span, so document
+                # provenance can resolve back to an exact chunk (and, via it,
+                # a page/heading) rather than only "somewhere in this
+                # document".
+                source_location_prefix = format_chunk_source_location(job.target_chunk_id)
+                result = await self._extract_document(
+                    window=window, target_chunk_id=job.target_chunk_id
+                )
+            else:
+                async with db.session() as session:
+                    window = await MessageRepository(
+                        session, user_id=job.user_id
+                    ).list_by_sequence_range(
+                        conversation_id=job.conversation_id,
+                        start_sequence=job.window_start_sequence,
+                        end_sequence=job.window_end_sequence,
+                    )
+                target = next((m for m in window if m.id == job.target_message_id), None)
+                if target is None:
+                    async with db.session() as session:
+                        await ExtractionQueue(session).mark_failed(
+                            job_id=job.id,
+                            error_code="target_message_missing",
+                            error_detail="the job's target message was not found in its own window",
+                            permanent=True,
+                            next_attempt_at=None,
+                            now=now,
+                        )
+                    return
+                source_type = SourceType.MESSAGE
+                source_reference = target.id
+                source_location_prefix = None
+                result = await self._extract(window=window, target_message_id=job.target_message_id)
         except LLMUnavailableError as exc:
             async with db.session() as session:
                 await ExtractionQueue(session).mark_failed(
@@ -248,6 +292,14 @@ class ExtractionRunner:
                     next_attempt_at=None,
                     now=now,
                 )
+                if is_document_job:
+                    await DocumentChunkRepository(
+                        session, user_id=job.user_id
+                    ).set_extraction_status(
+                        chunk_id=job.target_chunk_id, status=ExtractionStatus.FAILED
+                    )
+            if is_document_job:
+                await self._maybe_finalize_document(db=db, job=job, now=now)
             return
         except ConfigurationError as exc:
             async with db.session() as session:
@@ -259,6 +311,14 @@ class ExtractionRunner:
                     next_attempt_at=None,
                     now=now,
                 )
+                if is_document_job:
+                    await DocumentChunkRepository(
+                        session, user_id=job.user_id
+                    ).set_extraction_status(
+                        chunk_id=job.target_chunk_id, status=ExtractionStatus.FAILED
+                    )
+            if is_document_job:
+                await self._maybe_finalize_document(db=db, job=job, now=now)
             return
         except Exception as exc:  # noqa: BLE001 - never let an unexpected error strand a job in_progress
             logger.exception("Unexpected error extracting job %s", job.id)
@@ -293,16 +353,17 @@ class ExtractionRunner:
                     continue
 
                 async with db.session() as session:
-                    candidates_repo = ExtractionCandidateRepository(
-                        session, user_id=job.user_id
-                    )
+                    candidates_repo = ExtractionCandidateRepository(session, user_id=job.user_id)
                     merge_repo = EntityMergeCandidateRepository(session, user_id=job.user_id)
                     review_repo = MemoryReviewCandidateRepository(session, user_id=job.user_id)
                     embedding_repo = EmbeddingRepository(session, user_id=job.user_id)
 
                     applied = await self._apply_candidate(
                         candidate,
-                        target_message=target,
+                        target_content=target.content,
+                        source_type=source_type,
+                        source_reference=source_reference,
+                        source_location_prefix=source_location_prefix,
                         window_text=window_text,
                         user_id=job.user_id,
                         memory_service=memory_service,
@@ -315,7 +376,8 @@ class ExtractionRunner:
                     record, created = await candidates_repo.record_candidate(
                         candidate_id=self._new_id(),
                         extraction_job_id=job.id,
-                        source_message_id=job.target_message_id,
+                        source_message_id=None if is_document_job else job.target_message_id,
+                        source_chunk_id=job.target_chunk_id if is_document_job else None,
                         ordinal=ordinal,
                         payload=payload,
                         decision=applied.decision,
@@ -373,9 +435,14 @@ class ExtractionRunner:
             return
 
         async with db.session() as session:
-            await MessageRepository(session, user_id=job.user_id).set_extraction_status(
-                message_id=job.target_message_id, status=ExtractionStatus.DONE
-            )
+            if is_document_job:
+                await DocumentChunkRepository(session, user_id=job.user_id).set_extraction_status(
+                    chunk_id=job.target_chunk_id, status=ExtractionStatus.DONE
+                )
+            else:
+                await MessageRepository(session, user_id=job.user_id).set_extraction_status(
+                    message_id=job.target_message_id, status=ExtractionStatus.DONE
+                )
             await ExtractionQueue(session).mark_done(
                 job_id=job.id,
                 provider=result.provider,
@@ -388,11 +455,64 @@ class ExtractionRunner:
                 now=now,
             )
 
-    async def _extract(
-        self, *, window: list[Message], target_message_id: str
-    ) -> ExtractionResult:
+        if is_document_job:
+            await self._maybe_finalize_document(db=db, job=job, now=now)
+
+    async def _maybe_finalize_document(
+        self, *, db: Database, job: ExtractionJob, now: datetime
+    ) -> None:
+        """Roll a document's coarse status up to COMPLETE/PARTIALLY_COMPLETE
+        once every one of its chunks has reached a terminal extraction_status
+        (DONE or FAILED) -- the document-only analogue of a step conversation
+        jobs never need, since a message has no parent entity whose status
+        depends on its siblings (PHASE6_PLAN.md section 3's `DocumentStatus`
+        lifecycle). A no-op, safe to call repeatedly, while any chunk is
+        still pending/queued/in progress.
+        """
+        async with db.session() as session:
+            counts = await DocumentChunkRepository(
+                session, user_id=job.user_id
+            ).count_by_extraction_status(document_id=job.document_id)
+        non_terminal = sum(
+            counts.get(status.value, 0)
+            for status in (
+                ExtractionStatus.PENDING,
+                ExtractionStatus.QUEUED,
+                ExtractionStatus.IN_PROGRESS,
+            )
+        )
+        if non_terminal > 0:
+            return
+        document_status = (
+            DocumentStatus.PARTIALLY_COMPLETE
+            if counts.get(ExtractionStatus.FAILED.value, 0)
+            else DocumentStatus.COMPLETE
+        )
+        async with db.session() as session:
+            await DocumentRepository(session, user_id=job.user_id).set_status(
+                document_id=job.document_id, status=document_status, processed_at=now
+            )
+
+    async def _extract(self, *, window: list[Message], target_message_id: str) -> ExtractionResult:
         """Call the LLM, with one repair attempt on a schema-invalid response."""
         prompt = build_extraction_prompt(window=window, target_message_id=target_message_id)
+        return await self._complete_with_repair(prompt)
+
+    async def _extract_document(
+        self, *, window: list[DocumentChunk], target_chunk_id: str
+    ) -> ExtractionResult:
+        """Call the LLM over a document-chunk window -- the document
+        analogue of `_extract`, same contract and same repair behavior.
+        """
+        prompt = build_document_extraction_prompt(window=window, target_chunk_id=target_chunk_id)
+        return await self._complete_with_repair(prompt)
+
+    async def _complete_with_repair(self, prompt: str) -> ExtractionResult:
+        """One LLM call, with one repair attempt on a schema-invalid response.
+
+        Shared by `_extract`/`_extract_document` -- both build a prompt
+        differently but call the LLM identically.
+        """
         try:
             return await self._llm.complete_structured(
                 prompt=prompt,
@@ -444,7 +564,10 @@ class ExtractionRunner:
         self,
         candidate: CandidateMemory,
         *,
-        target_message: Message,
+        target_content: str,
+        source_type: SourceType,
+        source_reference: str,
+        source_location_prefix: str | None,
         window_text: str,
         user_id: str,
         memory_service: MemoryService,
@@ -455,6 +578,12 @@ class ExtractionRunner:
         now: datetime,
     ) -> CandidateApplication:
         """Classify and, for every outcome but IGNORE/INVALID, persist one candidate.
+
+        `target_content`/`source_type`/`source_reference` generalize what was
+        previously a single `target_message: Message` (Phase 6, ADR 0012): a
+        conversation message and a document chunk both play the identical
+        role here, so the only thing the caller need supply is the target's
+        text and where the resulting `Source` should point.
 
         Never raises: a domain-validation failure downstream (e.g. Phase 1
         rejecting a self-referencing relationship the LLM contract's own checks
@@ -469,7 +598,7 @@ class ExtractionRunner:
 
         grounding = check_grounding(
             candidate,
-            target_message_content=target_message.content,
+            target_message_content=target_content,
             window_text=window_text,
         )
         if not grounding.grounded:
@@ -477,8 +606,11 @@ class ExtractionRunner:
 
         try:
             await self._flag_ambiguous_entities(
-                candidate, user_id=user_id, retrieval_service=retrieval_service,
-                merge_repo=merge_repo, now=now,
+                candidate,
+                user_id=user_id,
+                retrieval_service=retrieval_service,
+                merge_repo=merge_repo,
+                now=now,
             )
 
             per_relationship = []
@@ -505,8 +637,11 @@ class ExtractionRunner:
                 # question `classify_relationship` already owns).
                 if exact.decision is DecisionType.NEW:
                     exact = await self._semantic_relationship_decision(
-                        rel, candidate=candidate, user_id=user_id,
-                        embedding_repo=embedding_repo, memory_service=memory_service,
+                        rel,
+                        candidate=candidate,
+                        user_id=user_id,
+                        embedding_repo=embedding_repo,
+                        memory_service=memory_service,
                         fallback=exact,
                     )
                 per_relationship.append(exact)
@@ -519,14 +654,19 @@ class ExtractionRunner:
             # limitation, closed here).
             if not candidate.relationships and governing.decision is DecisionType.NEW:
                 governing = await self._semantic_bare_statement_decision(
-                    candidate, user_id=user_id, embedding_repo=embedding_repo,
-                    memory_service=memory_service, fallback=governing,
+                    candidate,
+                    user_id=user_id,
+                    embedding_repo=embedding_repo,
+                    memory_service=memory_service,
+                    fallback=governing,
                 )
 
             memory_id = await self._persist(
                 candidate,
                 decision=governing,
-                target_message=target_message,
+                source_type=source_type,
+                source_reference=source_reference,
+                source_location_prefix=source_location_prefix,
                 user_id=user_id,
                 memory_service=memory_service,
             )
@@ -550,8 +690,8 @@ class ExtractionRunner:
             )
         except AppError as exc:
             logger.warning(
-                "Candidate rejected by domain validation for message %s: %s",
-                target_message.id,
+                "Candidate rejected by domain validation for source %s: %s",
+                source_reference,
                 exc.message,
             )
             return CandidateApplication(
@@ -876,7 +1016,9 @@ class ExtractionRunner:
         candidate: CandidateMemory,
         *,
         decision: RelationshipDecision,
-        target_message: Message,
+        source_type: SourceType,
+        source_reference: str,
+        source_location_prefix: str | None,
         user_id: str,
         memory_service: MemoryService,
     ) -> str | None:
@@ -884,10 +1026,12 @@ class ExtractionRunner:
         `MemoryService`. Every branch below persists or corroborates something, so
         this always returns a memory id; IGNORE and INVALID never reach here.
         """
+        span = f"{candidate.source_span.start}:{candidate.source_span.end}"
+        location = f"{source_location_prefix}:{span}" if source_location_prefix else span
         source = SourceInput(
-            source_type=SourceType.MESSAGE,
-            reference=target_message.id,
-            location=f"{candidate.source_span.start}:{candidate.source_span.end}",
+            source_type=source_type,
+            reference=source_reference,
+            location=location,
         )
         entities = [
             EntityInput(name=e.name, entity_type=e.entity_type, aliases=e.aliases)
@@ -1016,8 +1160,11 @@ async def run_worker_tick(
         return 0
 
     runner = ExtractionRunner(
-        graph_client=graph_client, llm_client=llm_client, embedding_client=embedding_client,
-        settings=settings, now_fn=now_fn,
+        graph_client=graph_client,
+        llm_client=llm_client,
+        embedding_client=embedding_client,
+        settings=settings,
+        now_fn=now_fn,
     )
     for job in claimed:
         await runner.run(job, db=db)

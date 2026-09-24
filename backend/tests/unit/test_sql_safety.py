@@ -39,8 +39,21 @@ FORBIDDEN_NAMES = frozenset({"select", "update", "delete"})
 #:   bounded cross-user enumeration for the embedding backfill sweep -- the same
 #:   "must walk every user by design" shape as extraction_queue.py. See its module
 #:   docstring.
+#: * ingestion_queue.py  is Phase 6's document-ingestion analogue of
+#:   extraction_queue.py, exempt for the identical reason: claiming, leasing
+#:   and completing ingestion jobs is deliberately cross-user (a worker tick
+#:   processes every user's backlog in one pass). See its module docstring.
+#:   Every method that CAN be scoped to one user lives in
+#:   document_repository.py/ingestion_repository.py instead, which are not
+#:   exempted.
 EXEMPT_FILES = frozenset(
-    {"sql_base.py", "extraction_queue.py", "user_repository.py", "__init__.py"}
+    {
+        "sql_base.py",
+        "extraction_queue.py",
+        "user_repository.py",
+        "ingestion_queue.py",
+        "__init__.py",
+    }
 )
 
 REPO_DIR = Path(__file__).resolve().parents[2] / "app" / "repositories"
@@ -114,6 +127,7 @@ def test_exemptions_are_exactly_the_documented_set() -> None:
         "sql_base.py",
         "extraction_queue.py",
         "user_repository.py",
+        "ingestion_queue.py",
     }
 
 

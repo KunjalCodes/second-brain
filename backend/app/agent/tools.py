@@ -54,6 +54,7 @@ from app.models.agent import (
 )
 from app.models.conversation import Message
 from app.models.domain import MemoryDetail
+from app.models.enums import SourceType
 from app.models.extraction import CandidateMemory, DecisionType, Span
 from app.repositories.embedding_repository import EmbeddingRepository
 from app.repositories.entity_merge_repository import EntityMergeCandidateRepository
@@ -405,6 +406,18 @@ async def get_source(args: GetSourceArgs, *, user_id: str, deps: ToolDependencie
         if sp.message is not None:
             entry["message_content"] = sp.message.content
             entry["message_role"] = sp.message.role.value
+        if sp.document is not None:
+            entry["document_filename"] = sp.document.filename
+        if sp.document_chunk is not None:
+            entry["document_chunk_content"] = sp.document_chunk.content
+            if sp.document_chunk.page_start is not None:
+                entry["document_page"] = (
+                    sp.document_chunk.page_start
+                    if sp.document_chunk.page_start == sp.document_chunk.page_end
+                    else f"{sp.document_chunk.page_start}-{sp.document_chunk.page_end}"
+                )
+            if sp.document_chunk.heading_context is not None:
+                entry["document_section"] = sp.document_chunk.heading_context
         sources.append(entry)
 
     return ToolResult(
@@ -526,7 +539,10 @@ async def propose_memory_update(
     async with deps.db.session() as session:
         applied = await runner._apply_candidate(  # noqa: SLF001 - the reuse point PHASE5_PLAN.md section 7 designates
             candidate,
-            target_message=target_message,
+            target_content=target_message.content,
+            source_type=SourceType.MESSAGE,
+            source_reference=target_message.id,
+            source_location_prefix=None,
             window_text=deps.window_text,
             user_id=user_id,
             memory_service=deps.memory,

@@ -463,6 +463,84 @@ class TestGetSourceTool:
         assert result.status == ToolStatus.OK
         assert result.data["sources"][0]["source_type"] == "user_statement"
 
+    async def test_renders_richer_provenance_for_a_document_backed_memory(
+        self,
+        db,
+        graph,
+        settings,
+        user_id,
+        pg_cleanup,
+        cleanup,  # noqa: ANN001
+    ) -> None:
+        """Phase 6 (ADR 0012): `get_source` renders page/section/chunk-content
+        fields when a memory's source resolves to a document, on top of the
+        same `source_type`/`reference` fields every source already has --
+        the tool is not redesigned, only its rendering is extended.
+        """
+        from app.db.models import DocumentChunk as ChunkRow
+        from app.models.conversation import ExtractionStatus
+        from app.models.document import format_chunk_source_location
+        from app.repositories.document_repository import DocumentChunkRepository, DocumentRepository
+
+        async with db.session() as session:
+            await UserRepository(session).ensure_exists(user_id, now=JAN)
+            document, _ = await DocumentRepository(session, user_id=user_id).create(
+                document_id=str(uuid.uuid4()),
+                filename="spec.txt",
+                content_type="text/plain",
+                size_bytes=10,
+                content_hash=str(uuid.uuid4()),
+                storage_key=str(uuid.uuid4()),
+                now=JAN,
+            )
+            chunk = ChunkRow(
+                id=str(uuid.uuid4()),
+                document_id=document.id,
+                user_id=user_id,
+                ordinal=0,
+                content="The system uses PaddleOCR.",
+                content_hash="deadbeef",
+                page_start=2,
+                page_end=2,
+                heading_context="OCR",
+                char_start=0,
+                char_end=26,
+                extraction_status=ExtractionStatus.DONE.value,
+                created_at=JAN,
+            )
+            await DocumentChunkRepository(session, user_id=user_id).bulk_create(chunks=[chunk])
+
+        memory_service = MemoryService(MemoryRepository(graph), now_fn=lambda: JAN)
+        created = await memory_service.create(
+            user_id=user_id,
+            payload=MemoryCreate.model_validate(
+                {
+                    "content": "The system uses PaddleOCR",
+                    "entities": [{"name": "PaddleOCR", "entity_type": "technology"}],
+                    "source": {
+                        "source_type": "document",
+                        "reference": document.id,
+                        "location": f"{format_chunk_source_location(chunk.id)}:0:26",
+                    },
+                }
+            ),
+        )
+
+        async with db.session() as session:
+            deps = _deps(session, graph, settings)
+            result = await get_source(
+                GetSourceArgs(memory_id=created.memory.id), user_id=user_id, deps=deps
+            )
+
+        assert result.status == ToolStatus.OK
+        entry = result.data["sources"][0]
+        assert entry["source_type"] == "document"
+        assert entry["reference"] == document.id
+        assert entry["document_filename"] == "spec.txt"
+        assert entry["document_chunk_content"] == "The system uses PaddleOCR."
+        assert entry["document_page"] == 2
+        assert entry["document_section"] == "OCR"
+
     async def test_unknown_memory_is_not_found(
         self,
         db,

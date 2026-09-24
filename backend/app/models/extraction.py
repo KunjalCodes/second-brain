@@ -176,15 +176,38 @@ class ExtractionJobStatus(StrEnum):
     ABANDONED = "abandoned"
 
 
+class ExtractionSourceKind(StrEnum):
+    """Which of the two mutually-exclusive target pairs an `ExtractionJob`
+    populates (Phase 6, ADR 0012, PHASE6_PLAN.md section 3). A conversation
+    message and a document chunk play the identical role in this pipeline --
+    this is the one field that says which one a given job is about.
+    """
+
+    MESSAGE = "message"
+    DOCUMENT_CHUNK = "document_chunk"
+
+
 class ExtractionJob(BaseModel):
-    """One unit of extraction work over a window of messages."""
+    """One unit of extraction work over a window of messages OR document
+    chunks (Phase 6 widens this from "messages only", ADR 0012).
+
+    Exactly one of `(conversation_id, target_message_id)` or
+    `(document_id, target_chunk_id)` is set, matching `source_kind` --
+    enforced by a database CHECK constraint, not merely convention.
+    `window_start_sequence`/`window_end_sequence` are reused unchanged for
+    document jobs: a chunk's `ordinal` plays the exact role a message's
+    `sequence` plays for conversation jobs.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     user_id: str
-    conversation_id: str
-    target_message_id: str
+    source_kind: ExtractionSourceKind = ExtractionSourceKind.MESSAGE
+    conversation_id: str | None = None
+    target_message_id: str | None = None
+    document_id: str | None = None
+    target_chunk_id: str | None = None
     window_start_sequence: int
     window_end_sequence: int
     extractor_version: str
@@ -218,7 +241,11 @@ class ExtractionCandidateRecord(BaseModel):
     id: str
     extraction_job_id: str
     user_id: str
-    source_message_id: str
+    #: Exactly one of these two is set (Phase 6, ADR 0012) -- enforced by a
+    #: database CHECK constraint. Every pre-Phase-6 row has
+    #: `source_message_id` set and `source_chunk_id` NULL.
+    source_message_id: str | None = None
+    source_chunk_id: str | None = None
     ordinal: int
     candidate_hash: str
     payload: dict[str, Any]

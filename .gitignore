@@ -23,3 +23,7 @@ out/
 .DS_Store
 *.swp
 .idea/
+
+# Local document storage (Phase 6, DOCUMENT_STORAGE_DIR default) -- uploaded
+# file bytes, never committed, same status as any other local runtime data.
+backend/data/

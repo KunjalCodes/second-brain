@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import (
     agent,
     conversations,
+    documents,
     embeddings,
     entities,
     extraction,
@@ -194,6 +195,7 @@ def create_app() -> FastAPI:
     app.include_router(memories.router, prefix=prefix)
     app.include_router(entities.router, prefix=prefix)
     app.include_router(conversations.router, prefix=prefix)
+    app.include_router(documents.router, prefix=prefix)
     app.include_router(extraction.router, prefix=prefix)
     app.include_router(extraction.internal_router, prefix=prefix)
     app.include_router(embeddings.internal_router, prefix=prefix)

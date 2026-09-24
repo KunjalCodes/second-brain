@@ -18,6 +18,7 @@ from fastapi import APIRouter, BackgroundTasks, Query, status
 from app.api.deps import (
     ConversationServiceDep,
     CurrentUser,
+    DbSessionDep,
     EmbeddingClientDep,
     LLMClientDep,
     SettingsDep,
@@ -113,9 +114,7 @@ async def get_conversation(
     user_id: CurrentUser,
     service: ConversationServiceDep,
 ) -> ConversationDetail:
-    return await service.get_conversation(
-        user_id=user_id, conversation_id=conversation_id
-    )
+    return await service.get_conversation(user_id=user_id, conversation_id=conversation_id)
 
 
 @router.post(
@@ -129,6 +128,7 @@ async def append_message(
     payload: MessageCreate,
     user_id: CurrentUser,
     service: ConversationServiceDep,
+    db_session: DbSessionDep,
     background_tasks: BackgroundTasks,
     llm_client: LLMClientDep,
     embedding_client: EmbeddingClientDep,
@@ -149,6 +149,18 @@ async def append_message(
         content=payload.content,
     )
     if message.extraction_status is ExtractionStatus.QUEUED:
+        # FastAPI/Starlette runs a `yield`-dependency's exit code (where
+        # `get_db_session`'s `async with db.session()` commits) AFTER
+        # `BackgroundTasks`, not before -- documented FastAPI behavior. Left
+        # alone, the background tick below would query for a claimable
+        # `ExtractionJob` before this request's own insert of it (via
+        # `service.append_message` -> `maybe_trigger_extraction`) was ever
+        # committed, and could silently find nothing, degrading the live
+        # path to sweep-only processing (same fix, same reasoning, as
+        # `app.api.routes.documents.upload_document`). Committing explicitly
+        # here, before scheduling the task, closes that race; the session's
+        # own commit-on-exit afterward is then a safe no-op.
+        await db_session.commit()
         background_tasks.add_task(
             _background_extraction_tick,
             llm_client=llm_client,

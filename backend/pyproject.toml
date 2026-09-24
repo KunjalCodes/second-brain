@@ -20,6 +20,8 @@ dependencies = [
     # client-side type, not a service -- the vector store is the same PostgreSQL
     # already in use.
     "pgvector>=0.3",
+    "pypdf>=6.19.0",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]

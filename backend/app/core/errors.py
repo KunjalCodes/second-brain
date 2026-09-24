@@ -144,3 +144,15 @@ class UnauthorizedError(AppError):
 
     status_code = 401
     code = "unauthorized"
+
+
+class StorageUnavailableError(AppError):
+    """Document byte storage (Phase 6, PHASE6_PLAN.md section 10) could not
+    be written to or read from -- e.g. the local filesystem's configured
+    root directory is not writable. Distinct from `DatabaseUnavailableError`/
+    `GraphUnavailableError` so callers can tell which of the three stores
+    failed.
+    """
+
+    status_code = 503
+    code = "storage_unavailable"

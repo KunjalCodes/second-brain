@@ -29,6 +29,7 @@ from app.models.extraction import (
     ExtractionCandidateRecord,
     ExtractionJob,
     ExtractionJobStatus,
+    ExtractionSourceKind,
 )
 from app.repositories.sql_base import UserScopedRepository
 
@@ -48,8 +49,11 @@ def _job_to_domain(row: JobRow) -> ExtractionJob:
     return ExtractionJob(
         id=row.id,
         user_id=row.user_id,
+        source_kind=ExtractionSourceKind(row.source_kind),
         conversation_id=row.conversation_id,
         target_message_id=row.target_message_id,
+        document_id=row.document_id,
+        target_chunk_id=row.target_chunk_id,
         window_start_sequence=row.window_start_sequence,
         window_end_sequence=row.window_end_sequence,
         extractor_version=row.extractor_version,
@@ -78,6 +82,7 @@ def _candidate_to_domain(row: CandidateRow) -> ExtractionCandidateRecord:
         extraction_job_id=row.extraction_job_id,
         user_id=row.user_id,
         source_message_id=row.source_message_id,
+        source_chunk_id=row.source_chunk_id,
         ordinal=row.ordinal,
         candidate_hash=row.candidate_hash,
         payload=row.payload,
@@ -139,6 +144,57 @@ class ExtractionJobRepository(UserScopedRepository):
         # is looked up by the unique key itself.
         stmt = self._select(JobRow).where(
             JobRow.target_message_id == target_message_id,
+            JobRow.extractor_version == extractor_version,
+        )
+        result = await self._session.execute(stmt)
+        return _job_to_domain(result.scalar_one())
+
+    async def create_document_chunk_job(
+        self,
+        *,
+        job_id: str,
+        document_id: str,
+        target_chunk_id: str,
+        window_start_ordinal: int,
+        window_end_ordinal: int,
+        extractor_version: str,
+        now: datetime,
+    ) -> ExtractionJob:
+        """The document-chunk counterpart to `create_job` (Phase 6, ADR 0012).
+
+        A separate method, not a branch inside `create_job`, so the
+        well-tested conversation path is touched by nothing here --
+        `create_job`'s own SQL and conflict target are completely unchanged.
+        Same idempotency shape: `ON CONFLICT (target_chunk_id,
+        extractor_version) DO NOTHING`, the chunk-side unique constraint
+        added alongside the existing message-side one (never replacing it).
+        """
+        stmt = (
+            insert(JobRow)
+            .values(
+                id=job_id,
+                user_id=self._user_id,
+                source_kind=ExtractionSourceKind.DOCUMENT_CHUNK.value,
+                document_id=document_id,
+                target_chunk_id=target_chunk_id,
+                window_start_sequence=window_start_ordinal,
+                window_end_sequence=window_end_ordinal,
+                extractor_version=extractor_version,
+                status=ExtractionJobStatus.PENDING.value,
+                created_at=now,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["target_chunk_id", "extractor_version"]
+            )
+            .returning(JobRow)
+        )
+        result = await self._session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is not None:
+            return _job_to_domain(row)
+
+        stmt = self._select(JobRow).where(
+            JobRow.target_chunk_id == target_chunk_id,
             JobRow.extractor_version == extractor_version,
         )
         result = await self._session.execute(stmt)
@@ -218,7 +274,8 @@ class ExtractionCandidateRepository(UserScopedRepository):
         *,
         candidate_id: str,
         extraction_job_id: str,
-        source_message_id: str,
+        source_message_id: str | None = None,
+        source_chunk_id: str | None = None,
         ordinal: int,
         payload: dict[str, Any],
         decision: DecisionType,
@@ -227,6 +284,11 @@ class ExtractionCandidateRepository(UserScopedRepository):
         now: datetime,
     ) -> tuple[ExtractionCandidateRecord, bool]:
         """Insert a candidate row, or return the existing one for this hash.
+
+        Exactly one of `source_message_id`/`source_chunk_id` must be given
+        (Phase 6, ADR 0012) -- enforced by the database CHECK constraint;
+        every call site before Phase 6 passes `source_message_id` only,
+        unchanged.
 
         Returns `(record, created)`. `created=False` means this exact candidate was
         already recorded for this job -- the second idempotency layer
@@ -241,6 +303,7 @@ class ExtractionCandidateRepository(UserScopedRepository):
                 extraction_job_id=extraction_job_id,
                 user_id=self._user_id,
                 source_message_id=source_message_id,
+                source_chunk_id=source_chunk_id,
                 ordinal=ordinal,
                 candidate_hash=chash,
                 payload=payload,

@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.db.engine import reset_database
 from app.graph.connection import reset_graph_client
 from app.llm.factory import reset_llm_client
+from app.storage.factory import reset_document_storage
 
 #: Fixed instants used throughout the tests, so assertions are exact rather than
 #: approximate. These mirror the seed narrative: EasyOCR from January, replaced by
@@ -27,7 +28,7 @@ JUN = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
-def _test_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Iterator[None]:  # noqa: ANN001
     """Give every test a clean, explicit configuration.
 
     `get_settings` is cached for the process, so the cache is cleared before and
@@ -49,15 +50,22 @@ def _test_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # Phase 2: FakeLLMClient is the default provider, so the unit suite never
     # needs an API key or network access.
     monkeypatch.setenv("LLM_PROVIDER", "fake")
+    # Phase 6: an isolated, per-test directory -- never the real
+    # `./data/documents` default -- so a test exercising the process-wide
+    # `get_document_storage()` singleton (e.g. through the API routes) cannot
+    # collide with another test or leave real files behind.
+    monkeypatch.setenv("DOCUMENT_STORAGE_DIR", str(tmp_path / "documents"))
     get_settings.cache_clear()
     reset_graph_client()
     reset_database()
     reset_llm_client()
+    reset_document_storage()
     yield
     get_settings.cache_clear()
     reset_graph_client()
     reset_database()
     reset_llm_client()
+    reset_document_storage()
 
 
 class FrozenClock:

@@ -27,6 +27,7 @@ from app.repositories.entity_repository import EntityRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.services.agent_service import AgentService
 from app.services.conversation_service import ConversationService
+from app.services.document_service import DocumentService
 from app.services.extraction_status_service import ExtractionStatusService
 from app.services.hybrid_retrieval_service import HybridRetrievalService
 from app.services.memory_service import MemoryService
@@ -34,6 +35,8 @@ from app.services.provenance_service import ProvenanceService
 from app.services.retrieval_service import RetrievalService
 from app.services.review_action_service import ReviewActionService
 from app.services.review_service import ReviewService
+from app.storage.base import DocumentStorage
+from app.storage.factory import get_document_storage
 
 #: Maximum accepted length of a user id, to keep an absurd header from reaching Cypher.
 MAX_USER_ID_LENGTH = 128
@@ -57,6 +60,10 @@ def get_llm() -> LLMClient:
 
 def get_embeddings() -> EmbeddingClient:
     return get_embedding_client()
+
+
+def get_storage() -> DocumentStorage:
+    return get_document_storage()
 
 
 async def get_db_session(
@@ -112,6 +119,14 @@ def get_conversation_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> ConversationService:
     return ConversationService(session, settings=settings)
+
+
+def get_document_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    storage: Annotated[DocumentStorage, Depends(get_storage)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> DocumentService:
+    return DocumentService(session, storage, settings=settings)
 
 
 def get_provenance_service(
@@ -236,6 +251,8 @@ CurrentUser = Annotated[str, Depends(get_current_user_id)]
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]
 RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
 ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
+DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
+DocumentStorageDep = Annotated[DocumentStorage, Depends(get_storage)]
 ProvenanceServiceDep = Annotated[ProvenanceService, Depends(get_provenance_service)]
 HybridRetrievalServiceDep = Annotated[HybridRetrievalService, Depends(get_hybrid_retrieval_service)]
 ExtractionStatusServiceDep = Annotated[

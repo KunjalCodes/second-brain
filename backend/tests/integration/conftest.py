@@ -54,6 +54,13 @@ _PG_CLEANUP_STATEMENTS = (
     "DELETE FROM extraction_jobs WHERE user_id = :user_id",
     "DELETE FROM entity_merge_candidates WHERE user_id = :user_id",
     "DELETE FROM memory_embeddings WHERE user_id = :user_id",
+    # Phase 6: ingestion_jobs/document_chunks both FK to documents with
+    # ON DELETE CASCADE, so deleting documents alone would suffice -- listed
+    # explicitly anyway, in FK-safe order, to match this file's existing
+    # style of never relying on cascade for test cleanup.
+    "DELETE FROM ingestion_jobs WHERE user_id = :user_id",
+    "DELETE FROM document_chunks WHERE user_id = :user_id",
+    "DELETE FROM documents WHERE user_id = :user_id",
     "DELETE FROM messages WHERE user_id = :user_id",
     "DELETE FROM conversations WHERE user_id = :user_id",
     "DELETE FROM users WHERE id = :user_id",
@@ -147,18 +154,14 @@ def other_user_id() -> str:
 
 
 @pytest.fixture
-async def cleanup(
-    graph: GraphClient, user_id: str, other_user_id: str
-) -> AsyncIterator[None]:
+async def cleanup(graph: GraphClient, user_id: str, other_user_id: str) -> AsyncIterator[None]:
     yield
     for uid in (user_id, other_user_id):
         await graph.write(CLEANUP, {"user_id": uid})
 
 
 @pytest.fixture
-async def pg_cleanup(
-    db: Database, user_id: str, other_user_id: str
-) -> AsyncIterator[None]:
+async def pg_cleanup(db: Database, user_id: str, other_user_id: str) -> AsyncIterator[None]:
     """PostgreSQL counterpart to `cleanup`. Separate fixture (rather than folded
     into `cleanup`) so Neo4j-only tests never need a PostgreSQL connection.
     """
