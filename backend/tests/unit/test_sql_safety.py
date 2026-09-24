@@ -46,12 +46,20 @@ FORBIDDEN_NAMES = frozenset({"select", "update", "delete"})
 #:   Every method that CAN be scoped to one user lives in
 #:   document_repository.py/ingestion_repository.py instead, which are not
 #:   exempted.
+#: * evaluation_repository.py  is Phase 7's evaluation-run persistence --
+#:   exempt for a DIFFERENT reason than the three above: `evaluation_runs`/
+#:   `evaluation_task_results` have no `user_id` column at all (they are
+#:   operational/developer metadata about system performance, not any
+#:   user's data -- see `app.models.evaluation`'s module docstring), so
+#:   there is no isolation filter to forget in the first place. See its
+#:   module docstring.
 EXEMPT_FILES = frozenset(
     {
         "sql_base.py",
         "extraction_queue.py",
         "user_repository.py",
         "ingestion_queue.py",
+        "evaluation_repository.py",
         "__init__.py",
     }
 )
@@ -105,9 +113,7 @@ def _violations(path: Path) -> list[str]:
 
 
 def _repository_files() -> list[Path]:
-    return sorted(
-        p for p in REPO_DIR.glob("*.py") if p.name not in EXEMPT_FILES
-    )
+    return sorted(p for p in REPO_DIR.glob("*.py") if p.name not in EXEMPT_FILES)
 
 
 @pytest.mark.parametrize("path", _repository_files(), ids=lambda p: p.name)
@@ -128,6 +134,7 @@ def test_exemptions_are_exactly_the_documented_set() -> None:
         "extraction_queue.py",
         "user_repository.py",
         "ingestion_queue.py",
+        "evaluation_repository.py",
     }
 
 

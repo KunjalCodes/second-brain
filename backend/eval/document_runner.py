@@ -69,6 +69,7 @@ from app.graph.connection import GraphClient  # noqa: E402
 from app.llm.factory import build_llm_client  # noqa: E402
 from app.llm.fake import FakeLLMClient  # noqa: E402
 from app.models.agent import GetSourceArgs, SearchMemoryArgs  # noqa: E402
+from app.models.evaluation import EvaluationTaskStatus  # noqa: E402
 from app.models.extraction import (  # noqa: E402
     CandidateEntity,
     CandidateMemory,
@@ -94,6 +95,7 @@ from app.services.provenance_service import ProvenanceService  # noqa: E402
 from app.services.retrieval_service import RetrievalService  # noqa: E402
 from app.storage.local import LocalDocumentStorage  # noqa: E402
 from eval.metrics import ScenarioResult, build_report  # noqa: E402
+from eval.persistence import EvaluationRunTracker, TaskOutcome  # noqa: E402
 
 #: Task ids meaningful as a real-agent question-answering check -- the ones
 #: with a natural `query` and a well-defined expected-citation set. The
@@ -110,6 +112,7 @@ REAL_LLM_TASK_IDS = (
 )
 
 DATASET_PATH = Path(__file__).parent / "datasets" / "document_v1.jsonl"
+DATASET_VERSION = "document_v1"
 BASE_DATE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
@@ -121,13 +124,21 @@ def load_dataset() -> list[dict]:
 @dataclass(frozen=True)
 class BaselineBResult:
     """One task's outcome under the evaluation-only 'raw chunk vector
-    search' baseline (PHASE6_PLAN.md section 16, baseline B) -- reported
-    separately from, and never averaged into, the pass/fail `ScenarioResult`s
-    the actual Phase 6 system (baseline E) is measured with.
+    search' baseline (PHASE6_PLAN.md section 16, baseline B; strengthened
+    per Phase 7's PHASE7_PLAN.md section 6, Stage 5) -- reported separately
+    from, and never averaged into, the pass/fail `ScenarioResult`s the
+    actual Phase 6 system (baseline E) is measured with.
+
+    `recall_at_1`/`recall_at_3`: of the expected keyword(s) for this task,
+    the fraction found anywhere across the raw top-1 (respectively top-3)
+    ranked chunks' content -- the document-chunk analogue of
+    `eval.metrics.recall_at_k`, computed over keyword coverage rather than
+    memory ids, since baseline B has no memory ids to rank.
     """
 
     task_id: str
-    hit: bool
+    recall_at_1: float
+    recall_at_3: float
     top_chunk_snippet: str
     note: str = ""
 
@@ -417,37 +428,80 @@ async def run_task(  # noqa: ANN001
     )
 
 
+#: Tasks with no natural single "find this fact in a chunk" comparison
+#: (a decision-classification outcome, a chunk-count check, or a query
+#: that is deliberately "n/a") are excluded from baseline B on purpose,
+#: not by omission -- there is nothing for a raw-chunk-retrieval baseline
+#: to be compared against for these.
+_BASELINE_B_EXCLUDED_TASK_IDS = frozenset(
+    {
+        "doc_prompt_injection",
+        "doc_large_document_bounded",
+        "doc_memory_absence",
+        "doc_conflicting_documents",
+    }
+)
+
+
 async def _run_baseline_b_for_task(
     task: dict,
     seeded: dict,
     embedding_client,  # noqa: ANN001
 ) -> BaselineBResult | None:
-    """Runs the evaluation-only baseline B (see its own docstring) for tasks
-    that name an `answer_contains` substring and have at least one seeded
-    document chunk to rank -- `None` for every other task, since a hit/miss
-    comparison is only meaningful when there is a single expected answer to
-    look for.
+    """Runs the evaluation-only baseline B (see its own docstring) for every
+    task that names `answer_contains` (a string, or a list of strings when
+    more than one fact is expected -- e.g. multi-document reasoning) and
+    has at least one seeded document chunk to rank. `None` for every other
+    task -- see `_BASELINE_B_EXCLUDED_TASK_IDS`.
     """
+    if task["task_id"] in _BASELINE_B_EXCLUDED_TASK_IDS:
+        return None
     answer = task.get("answer_contains")
     if not answer:
         return None
+    expected_keywords = [answer] if isinstance(answer, str) else list(answer)
     all_chunks = [c for chunks in seeded["chunks_by_document"].values() for c in chunks]
     if not all_chunks:
         return None
-    top = await _baseline_b_raw_chunk_search(task["query"], all_chunks, embedding_client, top_k=1)
-    top_chunk = top[0][1] if top else None
-    hit = bool(top_chunk and answer.lower() in top_chunk.content.lower())
+
+    def _coverage(top_chunks: list) -> float:  # noqa: ANN001 - list[DocumentChunk]
+        text = " ".join(c.content.lower() for c in top_chunks)
+        found = sum(1 for kw in expected_keywords if kw.lower() in text)
+        return found / len(expected_keywords)
+
+    top_1 = await _baseline_b_raw_chunk_search(task["query"], all_chunks, embedding_client, top_k=1)
+    top_3 = await _baseline_b_raw_chunk_search(task["query"], all_chunks, embedding_client, top_k=3)
+    recall_at_1 = _coverage([c for _, c in top_1])
+    recall_at_3 = _coverage([c for _, c in top_3])
+
     note = ""
     if task["task_id"] == "doc_temporal_facts":
         note = (
             "structural limitation, not just lower accuracy: this baseline has no "
-            "as-of/temporal mechanism at all -- it would return the same top chunk "
+            "as-of/temporal mechanism at all -- it would return the same top chunk(s) "
             "regardless of what date is asked about, unlike memory-based retrieval's "
             "genuine current-vs-historical distinction (see the report's temporal check)"
         )
+    elif task["task_id"] == "doc_document_and_conversation_combined":
+        note = (
+            "structural ceiling, not a ranking weakness: `answer_contains` here names "
+            "only the document-derived fact -- the conversation-derived fact (who "
+            "leads the project) exists in no document chunk at all, so no amount of "
+            "chunk retrieval could ever find it, unlike memory-based retrieval which "
+            "already found both (see baseline E's own result for this task)"
+        )
+    elif task["task_id"] == "doc_multi_document_reasoning" and recall_at_1 < 1.0 <= recall_at_3:
+        note = (
+            "top-1 cannot cover facts split across two different documents; top-3 "
+            "recovers them by accident of ranking depth, not synthesis -- memory-based "
+            "retrieval gets both from two separate, already-distinct canonical memories"
+        )
+
+    top_chunk = top_1[0][1] if top_1 else None
     return BaselineBResult(
         task_id=task["task_id"],
-        hit=hit,
+        recall_at_1=recall_at_1,
+        recall_at_3=recall_at_3,
         top_chunk_snippet=(top_chunk.content[:80] if top_chunk else ""),
         note=note,
     )
@@ -688,6 +742,42 @@ class RealLlmDocResult:
     error: str | None = None
 
 
+def _is_rate_limit_error(error: str) -> bool:
+    """Mirrors `eval.agent_runner._is_rate_limit_error` -- `"429"` is the
+    one infra-failure shape Phase 7 requires distinguishing from every
+    other kind (quota, not a code/network problem).
+    """
+    return "429" in error
+
+
+def _to_task_outcome(r: RealLlmDocResult) -> TaskOutcome:
+    """Maps one real-LLM document task result to the durable `TaskOutcome`
+    Phase 7's `EvaluationRunTracker` persists. Never stores the free-text
+    `answer` -- only ids/counts/strings (`app.models.evaluation`'s "no raw
+    memory/document content" rule).
+    """
+    if r.error is not None:
+        status = (
+            EvaluationTaskStatus.RATE_LIMITED
+            if _is_rate_limit_error(r.error)
+            else EvaluationTaskStatus.ERRORED
+        )
+        return TaskOutcome(status=status, error_detail=r.error)
+    return TaskOutcome(
+        status=EvaluationTaskStatus.COMPLETED,
+        passed=r.hit,
+        metrics={
+            "latency_ms": r.latency_ms,
+            "input_tokens": r.input_tokens,
+            "output_tokens": r.output_tokens,
+            "tool_call_count": r.tool_call_count,
+            "termination_reason": r.termination_reason,
+            "tool_sequence": r.tool_sequence,
+            "cited_memory_ids": r.cited_memory_ids,
+        },
+    )
+
+
 async def run_task_real_llm(  # noqa: ANN001
     db, graph, storage, embedding_client, settings, task: dict
 ) -> RealLlmDocResult:
@@ -849,18 +939,55 @@ async def main() -> int:
             if baseline_b is not None:
                 baseline_b_results.append(baseline_b)
 
+        real_llm_run_id: str | None = None
         if run_real_llm:
             print()
             print("=== B. Real-Gemini evaluation (agent tool-selection/synthesis) ===")
+            real_llm_task_ids = [t["task_id"] for t in tasks if t["task_id"] in REAL_LLM_TASK_IDS]
+            tracker = EvaluationRunTracker(db)
+            real_llm_run_id = await tracker.start_or_resume(
+                harness="document",
+                dataset_version=DATASET_VERSION,
+                mode="real_llm",
+                llm_provider=settings.llm_provider,
+                llm_model=settings.llm_model,
+                task_ids=real_llm_task_ids,
+            )
+            already_completed = await tracker.completed_task_ids(run_id=real_llm_run_id)
+            if already_completed:
+                print(
+                    f"Run {real_llm_run_id}: {len(already_completed)}/{len(real_llm_task_ids)} "
+                    f"task(s) already COMPLETED in a prior invocation -- skipping those."
+                )
+            rate_limited = False
             for task in tasks:
-                if task["task_id"] not in REAL_LLM_TASK_IDS:
+                task_id = task["task_id"]
+                if task_id not in REAL_LLM_TASK_IDS:
+                    continue
+                if task_id in already_completed:
+                    print(f"  [SKIP] {task_id:32} (already completed in {real_llm_run_id})")
+                    continue
+                if rate_limited:
+                    print(f"  [SKIP] {task_id:32} (rate-limited earlier this invocation)")
                     continue
                 real_result = await run_task_real_llm(
                     db, graph, storage, embedding_client, settings, task
                 )
                 real_llm_results.append(real_result)
+                await tracker.record_task(
+                    run_id=real_llm_run_id,
+                    task_id=task_id,
+                    category=task["category"],
+                    outcome=_to_task_outcome(real_result),
+                )
                 if real_result.error is not None:
                     print(f"  [ERROR] {real_result.task_id:32} -- {real_result.error}")
+                    if _is_rate_limit_error(real_result.error):
+                        rate_limited = True
+                        print(
+                            "  Rate-limited (HTTP 429) -- no further real-LLM calls this "
+                            "invocation. Persisted results are safe; re-run later to resume."
+                        )
                 else:
                     status = "HIT " if real_result.hit else "MISS"
                     print(
@@ -871,6 +998,12 @@ async def main() -> int:
                         f"tokens_in={real_result.input_tokens} "
                         f"tokens_out={real_result.output_tokens}"
                     )
+            summary = await tracker.finalize(run_id=real_llm_run_id, task_ids=real_llm_task_ids)
+            print(f"\nReal-LLM run {real_llm_run_id} persisted. Summary: {summary}")
+            print(
+                f"Inspect/compare later with: uv run python eval/report.py "
+                f"--run-id {real_llm_run_id}"
+            )
     finally:
         await db.close()
         await graph.close()
@@ -884,9 +1017,17 @@ async def main() -> int:
         print("Baseline B (evaluation-only raw chunk vector search, PHASE6_PLAN.md")
         print("section 16) -- never a production code path, never averaged into the")
         print("decision accuracy above:")
+        mean_r1 = sum(b.recall_at_1 for b in baseline_b_results) / len(baseline_b_results)
+        mean_r3 = sum(b.recall_at_3 for b in baseline_b_results) / len(baseline_b_results)
+        print(
+            f"  mean recall@1={mean_r1:.1%} mean recall@3={mean_r3:.1%} "
+            f"over {len(baseline_b_results)} task(s)"
+        )
         for b in baseline_b_results:
-            hit = "HIT " if b.hit else "MISS"
-            print(f"  [{hit}] {b.task_id:20} top chunk: {b.top_chunk_snippet!r}")
+            print(
+                f"  {b.task_id:38} recall@1={b.recall_at_1:.0%} "
+                f"recall@3={b.recall_at_3:.0%} top chunk: {b.top_chunk_snippet!r}"
+            )
             if b.note:
                 print(f"           note: {b.note}")
 

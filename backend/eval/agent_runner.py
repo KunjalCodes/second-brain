@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 import uuid
@@ -63,6 +64,7 @@ from app.models.agent import (  # noqa: E402
     SearchMemoryArgs,
     ToolCallStep,
 )
+from app.models.evaluation import EvaluationTaskStatus  # noqa: E402
 from app.repositories.entity_repository import EntityRepository  # noqa: E402
 from app.repositories.memory_repository import MemoryRepository  # noqa: E402
 from app.repositories.user_repository import UserRepository  # noqa: E402
@@ -72,9 +74,11 @@ from app.services.memory_service import MemoryService  # noqa: E402
 from app.services.provenance_service import ProvenanceService  # noqa: E402
 from app.services.retrieval_service import RetrievalService  # noqa: E402
 from eval.metrics import precision_at_k, recall_at_k  # noqa: E402
+from eval.persistence import EvaluationRunTracker, TaskOutcome  # noqa: E402
 from eval.retrieval_runner import _run_configuration, _seed_memories  # noqa: E402
 
 DATASET_PATH = Path(__file__).parent / "datasets" / "agent_v1.jsonl"
+DATASET_VERSION = "agent_v1"
 BASE_DATE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
@@ -243,6 +247,48 @@ class RealLlmResult:
     error: str | None = None
 
 
+def _is_rate_limit_error(error: str) -> bool:
+    """`LLMUnavailableError`'s message includes the upstream HTTP status
+    when known (`app/llm/providers/gemini.py`); `"429"` is the one
+    infra-failure shape Phase 7 requires distinguishing from every other
+    kind (quota, not a code/network problem) so a resumed run's summary can
+    report it separately.
+    """
+    return "429" in error
+
+
+def _to_task_outcome(r: RealLlmResult) -> TaskOutcome:
+    """Maps one real-LLM task result to the durable `TaskOutcome` Phase 7's
+    `EvaluationRunTracker` persists. Never stores the free-text `answer` --
+    only ids/counts/strings, matching `app.models.evaluation`'s "no raw
+    memory/document content" rule (the answer is model-generated text that
+    can echo seeded memory content back verbatim).
+    """
+    if r.error is not None:
+        status = (
+            EvaluationTaskStatus.RATE_LIMITED
+            if _is_rate_limit_error(r.error)
+            else EvaluationTaskStatus.ERRORED
+        )
+        return TaskOutcome(status=status, error_detail=r.error)
+    return TaskOutcome(
+        status=EvaluationTaskStatus.COMPLETED,
+        passed=r.recall >= 1.0 and r.precision >= 1.0,
+        metrics={
+            "recall": r.recall,
+            "precision": r.precision,
+            "latency_ms": r.latency_ms,
+            "input_tokens": r.input_tokens,
+            "output_tokens": r.output_tokens,
+            "tool_call_count": r.tool_call_count,
+            "termination_reason": r.termination_reason,
+            "tool_sequence": r.tool_sequence,
+            "cited_memory_ids": r.cited_memory_ids,
+            "answer_contains_expected": r.answer_contains_expected,
+        },
+    )
+
+
 async def _run_baseline_e_real_llm(
     db, graph, embedding_client, settings, user_id, task, memory_ids, now
 ) -> RealLlmResult:  # noqa: ANN001
@@ -371,9 +417,38 @@ async def main() -> None:
     embedding_client = FakeEmbeddingClient(dimension=settings.embedding_dimension)
 
     tasks = load_dataset()
+    # Phase 7 (Step 7): lets a category be evaluated in isolation, e.g. to
+    # inspect `retrieval_necessity` on its own before deciding whether a
+    # system-prompt change is warranted, without spending real-LLM quota on
+    # every other category too. Unset by default -- every existing usage
+    # (`uv run python eval/agent_runner.py`) is unaffected.
+    only_category = os.environ.get("EVAL_ONLY_CATEGORY")
+    if only_category:
+        tasks = [t for t in tasks if t["category"] == only_category]
+        print(f"EVAL_ONLY_CATEGORY={only_category!r} -- running {len(tasks)} task(s)\n")
+
     results: list[BaselineResult] = []
     real_llm_results: list[RealLlmResult] = []
     injection_ok: bool | None = None
+
+    tracker = EvaluationRunTracker(db)
+    real_llm_run_id: str | None = None
+    already_completed: set[str] = set()
+    real_llm_rate_limited = False
+    if run_real_llm:
+        real_llm_run_id = await tracker.start_or_resume(
+            harness="agent",
+            dataset_version=DATASET_VERSION,
+            mode="real_llm",
+            llm_provider=settings.llm_provider,
+            llm_model=settings.llm_model,
+            task_ids=[t["task_id"] for t in tasks],
+        )
+        already_completed = await tracker.completed_task_ids(run_id=real_llm_run_id)
+        print(
+            f"Real-LLM run {real_llm_run_id} -- {len(already_completed)}/{len(tasks)} "
+            f"task(s) already completed in a prior invocation and will be skipped.\n"
+        )
 
     try:
         for task in tasks:
@@ -420,22 +495,34 @@ async def main() -> None:
                     db, graph, embedding_client, settings, user_id, task, memory_ids, now
                 )
             )
-            if run_real_llm:
-                # A fresh user_id/seed per task already isolates real-LLM runs
-                # from the scripted baselines above -- same seeded memory_ids,
-                # a second independent set of Neo4j nodes under this task's
-                # own user_id would be wrong; re-seed under a new user so the
-                # real agent's own writes (if AGENT_WRITE_ENABLED) can never
-                # collide with what baselines A-E-scripted already touched.
-                real_user_id = f"eval-agent-real-{uuid.uuid4()}"
-                async with db.session() as session:
-                    await UserRepository(session).ensure_exists(real_user_id, now=BASE_DATE)
-                real_memory_ids = await _seed_memories(
-                    db, graph, embedding_client, real_user_id, task["seed"]
+            if run_real_llm and real_llm_rate_limited:
+                print(
+                    f"Skipping REAL-LLM task {task['task_id']!r} -- a prior task this "
+                    f"invocation was rate-limited; not continuing to hammer the API. "
+                    f"Deterministic baselines above still ran for every task."
                 )
-                print(f"Running REAL-LLM baseline for task {task['task_id']!r}...")
-                real_llm_results.append(
-                    await _run_baseline_e_real_llm(
+            elif run_real_llm:
+                task_id = task["task_id"]
+                if task_id in already_completed:
+                    print(
+                        f"Skipping REAL-LLM task {task_id!r} -- already COMPLETED in "
+                        f"run {real_llm_run_id} (resumed, not re-spending quota)."
+                    )
+                else:
+                    # A fresh user_id/seed per task already isolates real-LLM runs
+                    # from the scripted baselines above -- same seeded memory_ids,
+                    # a second independent set of Neo4j nodes under this task's
+                    # own user_id would be wrong; re-seed under a new user so the
+                    # real agent's own writes (if AGENT_WRITE_ENABLED) can never
+                    # collide with what baselines A-E-scripted already touched.
+                    real_user_id = f"eval-agent-real-{uuid.uuid4()}"
+                    async with db.session() as session:
+                        await UserRepository(session).ensure_exists(real_user_id, now=BASE_DATE)
+                    real_memory_ids = await _seed_memories(
+                        db, graph, embedding_client, real_user_id, task["seed"]
+                    )
+                    print(f"Running REAL-LLM baseline for task {task_id!r}...")
+                    real_result = await _run_baseline_e_real_llm(
                         db,
                         graph,
                         embedding_client,
@@ -445,19 +532,44 @@ async def main() -> None:
                         real_memory_ids,
                         now,
                     )
-                )
-                # A fixed pacing delay, not a per-task/content-specific hack:
-                # the free-tier Gemini rate limit was hit running all 9 tasks
-                # back to back (each makes 1-3 real calls), producing real
-                # HTTP 429s reported honestly as failures rather than hidden.
-                # This delay exists only to avoid re-triggering that same
-                # infra constraint on the next run; it does not change what
-                # any task asks the model to do.
-                await asyncio.sleep(8)
+                    real_llm_results.append(real_result)
+                    await tracker.record_task(
+                        run_id=real_llm_run_id,
+                        task_id=task_id,
+                        category=task["category"],
+                        outcome=_to_task_outcome(real_result),
+                    )
+                    if real_result.error is not None and _is_rate_limit_error(real_result.error):
+                        real_llm_rate_limited = True
+                        print(
+                            "Rate-limited (HTTP 429) -- no further real-LLM calls this "
+                            "invocation; deterministic baselines still run for every "
+                            "remaining task. Persisted results are safe; re-run later "
+                            "to resume."
+                        )
+                        continue
+                    # A fixed pacing delay, not a per-task/content-specific hack:
+                    # the free-tier Gemini rate limit was hit running all 9 tasks
+                    # back to back (each makes 1-3 real calls), producing real
+                    # HTTP 429s reported honestly as failures rather than hidden.
+                    # This delay exists only to avoid re-triggering that same
+                    # infra constraint on the next run; it does not change what
+                    # any task asks the model to do.
+                    await asyncio.sleep(8)
 
             if task["category"] == "prompt_injection":
                 malicious = task["seed"][0]["content"].split(". ", 1)[1]
                 injection_ok, _ = check_prompt_injection_is_data_not_instructions(malicious)
+
+        if run_real_llm:
+            summary = await tracker.finalize(
+                run_id=real_llm_run_id, task_ids=[t["task_id"] for t in tasks]
+            )
+            print(f"\nReal-LLM run {real_llm_run_id} persisted. Summary: {summary}")
+            print(
+                f"Inspect/compare later with: uv run python eval/report.py "
+                f"--run-id {real_llm_run_id}"
+            )
     finally:
         await db.close()
         await graph.close()

@@ -492,23 +492,23 @@ ai-second-brain/
 │   │   ├── llm/                 provider-independent LLM client + FakeLLMClient (Phase 2)
 │   │   ├── extraction/          gate, grounding, decision engine, runner (Phase 2)
 │   │   └── api/                 routes and dependencies
-│   ├── migrations/              Alembic migrations for PostgreSQL (Phase 2)
-│   ├── eval/                    extraction evaluation harness + fixtures (Phase 2)
+│   ├── migrations/              Alembic migrations for PostgreSQL (Phase 2+)
+│   ├── eval/                    evaluation harnesses + fixtures (Phase 2-7; see docs/PHASE7_PLAN.md)
 │   ├── tests/
-│   │   ├── unit/                no database required (383 tests)
-│   │   └── integration/         requires Neo4j + PostgreSQL; skips when absent (107 tests)
+│   │   ├── unit/                no database required
+│   │   └── integration/         requires Neo4j + PostgreSQL; skips when absent
 │   ├── pyproject.toml
 │   └── Procfile
 │
-├── frontend/                    Next.js on Vercel (Phase 3 — not built yet)
+├── frontend/                    Next.js on Vercel (Phase 9 per the roadmap — not built yet)
 │
 ├── docs/
 │   ├── PRODUCT.md
 │   ├── ARCHITECTURE.md
 │   ├── EVALUATION.md
 │   ├── API.md                   data model, graph schema, extraction pipeline, endpoints
-│   ├── PHASE2_PLAN.md           Phase 2 design (implemented)
-│   └── adr/                     architecture decision records (0001-0008)
+│   ├── PHASE2_PLAN.md .. PHASE7_PLAN.md   per-phase design + implementation status
+│   └── adr/                     architecture decision records (0001-0017)
 │
 ├── scripts/
 │   ├── init_graph.py            apply Neo4j constraints and indexes
@@ -593,7 +593,7 @@ The project explores:
 
 # 📌 Status
 
-**Phase 5 complete and behaviorally validated — persistent-memory agent (custom tool-calling loop, read + gated write tools, evaluation harness, real-LLM validation passed on Gemini).**
+**Phase 7 complete — unified, persistent, resumable evaluation framework layered on top of the Phase 6 document-ingestion system.**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -601,11 +601,13 @@ The project explores:
 | 2 | Persistent conversation memory + LLM extraction | ✅ Implemented |
 | 3 | Semantic memory + hybrid graph/vector retrieval | ✅ Implemented |
 | 4 | Multi-hop graph retrieval + memory/entity review workflow + threshold calibration + scale evaluation | ✅ Implemented |
-| 5 | Persistent-memory agent: custom tool-calling loop, 7 memory tools (6 read + 1 gated write), citation/temporal/provenance enforcement, evaluation harness, real-LLM behavioral validation | ✅ Implemented and validated, 684 tests passing (491 unit / 193 integration) |
-| 6 | Document ingestion | Not started |
-| 7 | Evaluation framework (answer-quality/citation/agent metrics) | Not started |
+| 5 | Persistent-memory agent: custom tool-calling loop, 7 memory tools (6 read + 1 gated write), citation/temporal/provenance enforcement, evaluation harness, real-LLM behavioral validation | ✅ Implemented and validated |
+| 6 | Document ingestion: TXT/Markdown/text-layer PDF, deterministic chunking, provenance, extraction-pipeline reuse (no second decision engine), zero-cost local storage | ✅ Implemented |
+| 7 | Evaluation framework: persistent/resumable evaluation runs (PostgreSQL), generalized `retrieval_necessity` category, strengthened evaluation-only baseline B, real-LLM checkpoint/resume | ✅ Implemented — see `docs/PHASE7_PLAN.md` for measured results and known limitations |
 | 8 | Authentication + productionization | Not started |
 | 9 | Deployment + UI polish | Not started |
+
+Current test count and per-phase measured evaluation results are reported in `docs/PHASE7_PLAN.md`'s implementation-status section rather than duplicated here, since they change with every phase.
 
 Phase 1 deliberately contains **no LLM, no embeddings, no agent, no document
 ingestion and no authentication**, so the graph-memory core could be verified on

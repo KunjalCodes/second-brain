@@ -718,3 +718,123 @@ class IngestionJob(Base):
         Index("ingestion_jobs_claimable", "status", "next_attempt_at"),
         Index("ingestion_jobs_lease", "status", "locked_at"),
     )
+
+
+class EvaluationRun(Base):
+    """One resumable evaluation-harness invocation (Phase 7,
+    PHASE7_PLAN.md section 6/7).
+
+    **Not user-owned data.** An evaluation run is operational/developer
+    metadata about how well the system performs -- it has no `user_id`
+    column at all (the synthetic `eval-*` users a run seeds in Neo4j/
+    PostgreSQL while it executes are cleaned up by the harness itself, the
+    same as every existing eval script already does; nothing about that
+    cleanup changes here). See `tests/unit/test_sql_safety.py`'s exemption
+    list for why `app/repositories/evaluation_repository.py` does not
+    extend `UserScopedRepository`.
+
+    Never a second source of truth for memory quality: `summary` holds only
+    aggregate counts/scores (recall, precision, category breakdowns) --
+    never raw memory or document content (Phase 7 security requirement).
+
+    A run stays resumable (`status='pending'` or `'in_progress'`) until
+    every one of its `EvaluationTaskResult` rows reaches `'completed'` or
+    `'skipped'`, at which point `EvaluationRunTracker.finalize` (see
+    `eval/persistence.py`) marks it `'completed'`. `'failed'` is reserved
+    for the run itself crashing (e.g. a lost database connection) --
+    distinct from any individual task's outcome, which lives on
+    `EvaluationTaskResult` instead.
+    """
+
+    __tablename__ = "evaluation_runs"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    harness: Mapped[str] = mapped_column(String(50), nullable=False)
+    dataset_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    llm_provider: Mapped[str | None] = mapped_column(String(50))
+    llm_model: Mapped[str | None] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    total_tasks: Mapped[int] = mapped_column(Integer, nullable=False)
+    config: Mapped[dict | None] = mapped_column(JSONB)
+    summary: Mapped[dict | None] = mapped_column(JSONB)
+    git_commit: Mapped[str | None] = mapped_column(String(40))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    task_results: Mapped[list[EvaluationTaskResult]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('deterministic','real_llm')",
+            name="evaluation_runs_mode_valid",
+        ),
+        CheckConstraint(
+            "status IN ('pending','in_progress','completed','failed')",
+            name="evaluation_runs_status_valid",
+        ),
+        Index(
+            "evaluation_runs_lookup",
+            "harness",
+            "dataset_version",
+            "mode",
+            "created_at",
+        ),
+    )
+
+
+class EvaluationTaskResult(Base):
+    """One task's outcome within one `EvaluationRun` (Phase 7,
+    PHASE7_PLAN.md section 6/7) -- the durable checkpoint a resumed run
+    reads to decide which tasks it can skip.
+
+    `status='completed'` means the task ran to completion without an
+    infrastructure error or rate-limit -- `passed` (only meaningful then)
+    is the separate, model-level judgment of whether the outcome was
+    correct. This is deliberate: "which tasks failed because of the
+    system" is `status='errored'`/`'rate_limited'`; "which tasks failed
+    because of the LLM" is `status='completed'` with `passed=false`. Never
+    conflated, per Phase 7's own stated Core Objective.
+
+    `metrics` holds whatever the harness computed for this task (recall,
+    precision, tool sequence, cited memory ids, latency, tokens) --
+    whichever keys are actually available for that task; a key that was
+    not computed is simply absent, never written as `0` or `null` standing
+    in for "unknown" (Phase 7's explicit "use explicit N/A / unavailable
+    semantics" requirement -- `eval/report.py`'s aggregation only averages
+    over the tasks that actually have a given key).
+    """
+
+    __tablename__ = "evaluation_task_results"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    passed: Mapped[bool | None] = mapped_column()
+    metrics: Mapped[dict | None] = mapped_column(JSONB)
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    run: Mapped[EvaluationRun] = relationship(back_populates="task_results")
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "task_id", name="evaluation_task_results_one_per_task"),
+        CheckConstraint(
+            "status IN ('pending','completed','rate_limited','errored','skipped')",
+            name="evaluation_task_results_status_valid",
+        ),
+        Index("evaluation_task_results_run_status", "run_id", "status"),
+    )

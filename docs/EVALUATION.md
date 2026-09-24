@@ -4,17 +4,36 @@
 
 ## Evaluation Framework
 
-> **Implementation status (Phase 3):** this document is the full aspirational
-> framework, written before an agent or answer-generation layer existed. As of
-> Phase 3, `backend/eval/runner.py` (extraction decision accuracy) and
-> `backend/eval/retrieval_runner.py` (Recall@K/Precision@K/MRR, comparing
-> graph-only/vector-only/hybrid retrieval, `eval/datasets/retrieval_v1.jsonl`)
-> are real, running, deterministic harnesses against `FakeLLMClient`/
-> `FakeEmbeddingClient` and real Neo4j/PostgreSQL. Baselines A and E's final
-> "→ LLM → Answer" step, citation metrics, and agent tool-selection metrics
-> (sections 3, 11, 12) are **not yet measurable** — they require the agent/
-> answer-generation layer, which is explicitly out of scope until Phase 5
-> (`docs/PHASE3_PLAN.md` section 16 records this scoping decision and why).
+> **Implementation status (updated Phase 7):** this document is the full
+> aspirational framework, written before an agent or answer-generation layer
+> existed. It has since been substantially realized:
+>
+> * `backend/eval/runner.py` (extraction decision accuracy, Phase 2) and
+>   `backend/eval/retrieval_runner.py` (Recall@K/Precision@K/MRR, comparing
+>   graph-only/vector-only/hybrid retrieval, `eval/datasets/retrieval_v1.jsonl`,
+>   Phase 3) are real, running, deterministic harnesses against
+>   `FakeLLMClient`/`FakeEmbeddingClient` and real Neo4j/PostgreSQL.
+> * Baselines A/B/C/D/E's final "→ LLM → Answer" step, citation metrics, and
+>   agent tool-selection metrics (sections 3, 11, 12) — once "not yet
+>   measurable" — are now measured by `backend/eval/agent_runner.py`
+>   (Phase 5, `eval/datasets/agent_v1.jsonl`), including a real-LLM baseline
+>   (`E_real_llm`) that lets the actual configured provider make every
+>   tool-selection/citation decision, not a scripted one.
+> * Document-sourced evaluation (`backend/eval/document_runner.py`, Phase 6,
+>   `eval/datasets/document_v1.jsonl`) extends the same methodology to
+>   documents, all 11 planned categories, plus an evaluation-only "raw chunk
+>   vector search" baseline B.
+> * **Phase 7** added persistent, resumable evaluation-run tracking
+>   (`evaluation_runs`/`evaluation_task_results` in PostgreSQL, ADR 0015),
+>   generalized the Phase 5 `ambiguous_entity` single-task finding into a
+>   measured `retrieval_necessity` category (ADR 0016), and made real-LLM
+>   runs checkpointed/resumable across rate-limited invocations (ADR 0017,
+>   `eval/persistence.py`, `eval/report.py`). See `docs/PHASE7_PLAN.md`'s
+>   implementation-status section for what was actually measured.
+>
+> What remains true from the original framework: LLM-as-judge answer scoring,
+> the full 50→500+ question dataset growth plan, and human evaluation are
+> still not implemented — see `docs/PHASE7_PLAN.md`'s "known limitations."
 
 ---
 
