@@ -1,0 +1,92 @@
+# Default CI: lint, unit tests, and the Cypher/SQL isolation audits.
+#
+# This workflow deliberately requires NO database and NO Docker. The unit suite
+# (484 tests) runs entirely against in-process test doubles -- FakeLLMClient and
+# FakeEmbeddingClient -- so every push gets fast, free, deterministic feedback --
+# no API key, no network, no cost. Integration tests need a real Neo4j and a real
+# PostgreSQL and live in integration.yml, which is opt-in.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push to the same ref cancels the previous run.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Lint
+        run: uv run ruff check app tests ../scripts
+
+  unit-tests:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the floor declared in pyproject.toml; 3.14 is the development
+        # version. Testing both catches accidental use of newer-only syntax.
+        python-version: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      - name: Unit tests
+        # No NEO4J_*/DATABASE_URL variables are set, so anything that needs a
+        # database would fail rather than silently pass -- see the guard step
+        # below. LLM_PROVIDER/EMBEDDING_PROVIDER are not set either; Fake clients
+        # are the default, so no API key is needed or used.
+        run: uv run --python ${{ matrix.python-version }} pytest tests/unit -v
+
+      - name: Cypher and SQL safety audits
+        # Called out as their own step because they enforce multi-user isolation:
+        # every Cypher statement filters on $user_id, and every SQL repository
+        # goes through UserScopedRepository rather than a bare select/update/
+        # delete. A failure here is a potential cross-user data leak, not a
+        # style problem.
+        run: |
+          uv run --python ${{ matrix.python-version }} pytest \
+            tests/unit/test_cypher_safety.py tests/unit/test_sql_safety.py -v
+
+      - name: Verify integration tests skip without services
+        # Guards the guard: if integration tests ever stopped skipping cleanly,
+        # the default pipeline would start failing for the wrong reason, or worse,
+        # would quietly stop covering the graph and the database at all.
+        run: |
+          set -o pipefail
+          uv run --python ${{ matrix.python-version }} pytest -q 2>&1 | tee result.txt
+          grep -q "skipped" result.txt || {
+            echo "::error::Expected integration tests to be skipped without Neo4j/PostgreSQL."
+            exit 1
+          }

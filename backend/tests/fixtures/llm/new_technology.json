@@ -1,0 +1,25 @@
+{
+  "candidates": [
+    {
+      "statement": "Drawing Extractor uses Gemini",
+      "memory_type": "semantic",
+      "persistence": "persistent",
+      "confidence": 0.92,
+      "entities": [
+        {"name": "Drawing Extractor", "entity_type": "project", "aliases": [],
+         "mention_span": {"start": 4, "end": 21}},
+        {"name": "Gemini", "entity_type": "technology", "aliases": [],
+         "mention_span": {"start": 27, "end": 33}}
+      ],
+      "relationships": [
+        {"source": "Drawing Extractor", "predicate": "uses", "target": "Gemini",
+         "confidence": 0.92}
+      ],
+      "temporal": {"valid_from_hint": null, "valid_until_hint": null,
+                   "is_change": false, "replaces_hint": null},
+      "source_message_id": "placeholder",
+      "source_span": {"start": 0, "end": 45},
+      "reasoning": "explicit statement of a technology relationship"
+    }
+  ]
+}

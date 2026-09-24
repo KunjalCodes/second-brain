@@ -1,0 +1,20 @@
+{"id": "dup_dev_1", "split": "dev", "text_a": "The project uses Gemini for classification", "text_b": "The project utilizes Gemini for classification", "label": 1}
+{"id": "dup_dev_2", "split": "dev", "text_a": "Drawing Extractor uses EasyOCR for text recognition", "text_b": "Drawing Extractor uses EasyOCR to recognize text", "label": 1}
+{"id": "dup_dev_3", "split": "dev", "text_a": "We deployed the service to production on Monday", "text_b": "The service was deployed to production on Monday", "label": 1}
+{"id": "dup_dev_4", "split": "dev", "text_a": "The database migration completed successfully", "text_b": "The database migration finished without errors", "label": 1}
+{"id": "dup_dev_5", "split": "dev", "text_a": "Alice is the lead engineer on this project", "text_b": "Alice leads engineering for this project", "label": 1}
+{"id": "dup_dev_6", "split": "dev", "text_a": "The API rate limit is 100 requests per minute", "text_b": "API requests are limited to 100 per minute", "label": 1}
+{"id": "dup_dev_7", "split": "dev", "text_a": "The project uses Gemini for classification", "text_b": "The project uses PaddleOCR for text extraction", "label": 0}
+{"id": "dup_dev_8", "split": "dev", "text_a": "Drawing Extractor uses EasyOCR for text recognition", "text_b": "Drawing Extractor depends on the OCR Module", "label": 0}
+{"id": "dup_dev_9", "split": "dev", "text_a": "Alice is the lead engineer on this project", "text_b": "Bob is the lead engineer on this project", "label": 0}
+{"id": "dup_dev_10", "split": "dev", "text_a": "The API rate limit is 100 requests per minute", "text_b": "The database connection pool size is 100", "label": 0}
+{"id": "dup_dev_11", "split": "dev", "text_a": "The team decided to adopt TypeScript for the frontend", "text_b": "The team decided to adopt Kubernetes for deployment", "label": 0}
+{"id": "dup_dev_12", "split": "dev", "text_a": "The office plant needs watering twice a week", "text_b": "The conference room projector needs calibration", "label": 0}
+{"id": "dup_holdout_1", "split": "holdout", "text_a": "The team decided to adopt TypeScript for the frontend", "text_b": "TypeScript was chosen for frontend development by the team", "label": 1}
+{"id": "dup_holdout_2", "split": "holdout", "text_a": "Customer support response time improved to under 2 hours", "text_b": "Support now responds in under 2 hours", "label": 1}
+{"id": "dup_holdout_3", "split": "holdout", "text_a": "The nightly backup job runs at 2am UTC", "text_b": "Backups run nightly at 2am UTC", "label": 1}
+{"id": "dup_holdout_4", "split": "holdout", "text_a": "Customer support response time improved to under 2 hours", "text_b": "Customer satisfaction scores improved this quarter", "label": 0}
+{"id": "dup_holdout_5", "split": "holdout", "text_a": "Quarterly revenue grew by 15 percent", "text_b": "Quarterly headcount grew by 15 percent", "label": 0}
+{"id": "dup_holdout_6", "split": "holdout", "text_a": "The nightly backup job runs at 2am UTC", "text_b": "The nightly batch job validates incoming data", "label": 0}
+{"id": "dup_holdout_7", "split": "holdout", "text_a": "The project uses Gemini for classification of scanned documents", "text_b": "Scanned documents are classified using Gemini in the project", "label": 1}
+{"id": "dup_holdout_8", "split": "holdout", "text_a": "Drawing Extractor is managed by the Platform Team", "text_b": "The Platform Team also maintains the Quarterly Roadmap", "label": 0}

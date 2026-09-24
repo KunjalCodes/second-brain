@@ -1,0 +1,16 @@
+{
+  "candidates": [
+    {
+      "statement": "A confidence value outside 0..1 must fail validation",
+      "memory_type": "semantic",
+      "persistence": "persistent",
+      "confidence": 1.4,
+      "entities": [],
+      "relationships": [],
+      "temporal": {"is_change": false},
+      "source_message_id": "placeholder",
+      "source_span": {"start": 0, "end": 10},
+      "reasoning": "adversarial fixture: confidence > 1.0"
+    }
+  ]
+}

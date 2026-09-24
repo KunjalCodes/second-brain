@@ -1,0 +1,17 @@
+{
+  "candidates": [
+    {
+      "statement": "User is tired after a long debugging session",
+      "memory_type": "episodic",
+      "persistence": "temporary",
+      "confidence": 0.55,
+      "entities": [],
+      "relationships": [],
+      "temporal": {"valid_from_hint": null, "valid_until_hint": null,
+                   "is_change": false, "replaces_hint": null},
+      "source_message_id": "placeholder",
+      "source_span": {"start": 0, "end": 40},
+      "reasoning": "a mood statement, not a durable fact"
+    }
+  ]
+}
