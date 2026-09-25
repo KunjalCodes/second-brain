@@ -15,7 +15,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import CurrentUser, InternalTokenDep, ReviewActionServiceDep, ReviewServiceDep
+from app.api.deps import (
+    RATE_LIMIT_WRITE,
+    CurrentUser,
+    InternalTokenDep,
+    ReviewActionServiceDep,
+    ReviewServiceDep,
+)
 from app.db.engine import get_database
 from app.graph.connection import get_graph_client
 from app.repositories.user_repository import UserRepository
@@ -148,6 +154,7 @@ async def list_review_history(
 
 @router.post(
     "/memories/{candidate_id}/confirm-duplicate",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=MemoryReviewCandidateDetail,
     summary="Confirm a likely-duplicate/flagged candidate as a true duplicate",
 )
@@ -170,6 +177,7 @@ async def confirm_duplicate(
 
 @router.post(
     "/memories/{candidate_id}/confirm-distinct",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=MemoryReviewCandidateDetail,
     summary="Reject a likely-duplicate/flagged candidate as not actually a duplicate",
 )
@@ -189,6 +197,7 @@ async def confirm_distinct(
 
 @router.post(
     "/memories/{candidate_id}/resolve-conflict",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=MemoryReviewCandidateDetail,
     summary="Resolve a conflicting memory pair (supersede / keep both / reject the flag)",
 )
@@ -210,6 +219,7 @@ async def resolve_conflict(
 
 @router.post(
     "/entities/{candidate_id}/approve-merge",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=EntityMergeCandidateDetail,
     summary="Approve an entity merge candidate",
 )
@@ -234,6 +244,7 @@ async def approve_entity_merge(
 
 @router.post(
     "/entities/{candidate_id}/reject-merge",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=EntityMergeCandidateDetail,
     summary="Reject an entity merge candidate (both entities stay distinct)",
 )
@@ -253,6 +264,7 @@ async def reject_entity_merge(
 
 @router.post(
     "/entities/{candidate_id}/reverse-merge",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=EntityMergeCandidateDetail,
     summary="Reverse a previously-approved entity merge",
 )

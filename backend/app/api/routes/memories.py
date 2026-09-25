@@ -12,6 +12,8 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Query, status
 
 from app.api.deps import (
+    RATE_LIMIT_SEARCH,
+    RATE_LIMIT_WRITE,
     CurrentUser,
     EmbeddingClientDep,
     MemoryServiceDep,
@@ -58,6 +60,7 @@ async def _background_embed(
 
 @router.post(
     "",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=MemoryDetail,
     status_code=status.HTTP_201_CREATED,
     summary="Create a memory",
@@ -89,7 +92,12 @@ async def create_memory(
 
 
 # Declared before /{memory_id} so that "search" is not captured as an id.
-@router.get("/search", response_model=MemoryListResponse, summary="Search memories")
+@router.get(
+    "/search",
+    dependencies=[RATE_LIMIT_SEARCH],
+    response_model=MemoryListResponse,
+    summary="Search memories",
+)
 async def search_memories(
     user_id: CurrentUser,
     service: MemoryServiceDep,
@@ -159,7 +167,12 @@ async def get_memory_provenance(
     return await service.get_provenance(user_id=user_id, memory_id=memory_id)
 
 
-@router.patch("/{memory_id}", response_model=Memory, summary="Update memory metadata")
+@router.patch(
+    "/{memory_id}",
+    dependencies=[RATE_LIMIT_WRITE],
+    response_model=Memory,
+    summary="Update memory metadata",
+)
 async def update_memory(
     memory_id: str,
     payload: MemoryUpdate,
@@ -177,6 +190,7 @@ async def update_memory(
 
 @router.post(
     "/{memory_id}/invalidate",
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=Memory,
     summary="Retract a memory",
 )

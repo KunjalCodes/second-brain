@@ -15,6 +15,7 @@ from dataclasses import replace
 from fastapi import APIRouter, BackgroundTasks, status
 
 from app.api.deps import (
+    RATE_LIMIT_AGENT,
     AgentServiceDep,
     ConversationServiceDep,
     CurrentUser,
@@ -73,6 +74,7 @@ async def _background_extraction_tick(
 
 @router.post(
     "/{conversation_id}/agent-turn",
+    dependencies=[RATE_LIMIT_AGENT],
     response_model=AgentTurnResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Run one agent turn: store the user's message, reason over memory, answer",

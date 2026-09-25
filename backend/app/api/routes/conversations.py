@@ -16,6 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Query, status
 
 from app.api.deps import (
+    RATE_LIMIT_MESSAGE,
     ConversationServiceDep,
     CurrentUser,
     DbSessionDep,
@@ -119,6 +120,7 @@ async def get_conversation(
 
 @router.post(
     "/{conversation_id}/messages",
+    dependencies=[RATE_LIMIT_MESSAGE],
     response_model=Message,
     status_code=status.HTTP_201_CREATED,
     summary="Append a message",

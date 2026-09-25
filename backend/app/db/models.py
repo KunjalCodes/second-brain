@@ -838,3 +838,75 @@ class EvaluationTaskResult(Base):
         ),
         Index("evaluation_task_results_run_status", "run_id", "status"),
     )
+
+
+# -- Phase 9: authentication (docs/PHASE9_PLAN.md section 14, ADRs 0020/0021) --------
+# AUTH identity lives here, separate from MEMORY OWNERSHIP identity (`users.id`,
+# unchanged). No credential is ever stored in `users`.
+
+
+class UserAccount(Base):
+    """A login credential for exactly one ownership id (`users.id`). The
+    server chooses `user_id` (UUID4 at registration, or an existing legacy id
+    via the operator CLI) -- no client request ever carries it."""
+
+    __tablename__ = "user_accounts"
+
+    user_id: Mapped[str] = mapped_column(
+        String(USER_ID_LENGTH), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    email_normalized: Mapped[str] = mapped_column(String(254), nullable=False, unique=True)
+    #: `scrypt$N$r$p$salt_b64$hash_b64` -- never a plaintext password.
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    password_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("status IN ('active','disabled')", name="user_accounts_status_valid"),
+        CheckConstraint(
+            "email_normalized = lower(email_normalized)", name="user_accounts_email_lowercase"
+        ),
+    )
+
+
+class AuthSession(Base):
+    """A server-side session. Only the SHA-256 of the opaque bearer token is
+    stored; the raw token exists only in the client's cookie/header."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(USER_ID_LENGTH), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("auth_sessions_user_active", "user_id", "revoked_at"),
+        CheckConstraint("char_length(token_sha256) = 64", name="auth_sessions_token_hash_len"),
+    )
+
+
+class RateLimitCounter(Base):
+    """One fixed-window counter. `bucket_key` is `<class>:<identity>` where the
+    identity is `u:<user_id>`, `ip:<address>` or `email:<sha256>` -- never a
+    raw email (ADR 0023)."""
+
+    __tablename__ = "rate_limit_counters"
+
+    bucket_key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (Index("rate_limit_counters_window", "window_start"),)

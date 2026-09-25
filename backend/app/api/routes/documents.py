@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, File, Query, UploadFile, status
 
 from app.api.deps import (
+    RATE_LIMIT_INGEST,
     CurrentUser,
     DbSessionDep,
     DocumentServiceDep,
@@ -101,6 +102,7 @@ async def _background_ingest_and_extract(
 
 @router.post(
     "",
+    dependencies=[RATE_LIMIT_INGEST],
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Upload a document",

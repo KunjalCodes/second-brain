@@ -9,6 +9,7 @@ localhost service -- see docs/adr/0004-deployment-topology.md.
 from __future__ import annotations
 
 import functools
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,7 +53,11 @@ class Settings(BaseSettings):
     # $PORT. Nothing in the application may assume a fixed port.
     frontend_url: str = ""
     cors_origins: str = ""
-    cors_allow_vercel_previews: bool = True
+    #: Phase 9: opt-in, and only for ONE Vercel project (`CORS_VERCEL_PROJECT`).
+    #: The pre-Phase-9 default admitted every `*.vercel.app` site -- any
+    #: stranger's deployment -- as a credentialed origin (PHASE9_PLAN.md F7).
+    cors_allow_vercel_previews: bool = False
+    cors_vercel_project: str = Field(default="", pattern=r"^([a-z0-9][a-z0-9-]{0,62})?$")
 
     # -- Neo4j -------------------------------------------------------------
     # Required. Deliberately has no default: a silent fallback to a localhost
@@ -256,28 +261,123 @@ class Settings(BaseSettings):
     graph_explore_max_hops: int = Field(default=2, ge=1, le=3)
     graph_explore_max_memories_per_entity: int = Field(default=5, ge=1, le=25)
 
-    # -- Phase 1 identity placeholder --------------------------------------
-    # Phase 1 has no authentication (Phase 9). The user id arrives in the
-    # X-User-Id header and falls back to this value. This is NOT a security
-    # boundary; it exists so that every record is namespaced from day one and
-    # real auth can replace only `app.api.deps.get_current_user_id`.
+    # -- Identity (Phase 9, docs/PHASE9_PLAN.md sections 6, 12, 13) -------------
+    #: `session` (default): identity comes ONLY from a verified session
+    #: credential. `dev_header`: the pre-Phase-9 `X-User-Id` / `DEV_USER_ID`
+    #: placeholder -- development and tests only; refused in any production-like
+    #: environment. None = not set explicitly (see `effective_auth_mode`).
+    auth_mode: Literal["session", "dev_header"] | None = None
+    #: Deprecated compatibility alias: `true` == `AUTH_MODE=dev_header`.
+    #: Setting both to contradicting values refuses to start.
+    allow_user_id_header: bool | None = None
+    #: Fallback identity in dev_header mode when no header is sent.
     dev_user_id: str = "dev-user"
-    allow_user_id_header: bool = True
+
+    #: Self-service registration. None = on in development/test, OFF in any
+    #: production-like environment (accounts come from scripts/manage_users.py).
+    auth_registration_enabled: bool | None = None
+    auth_session_ttl_hours: int = Field(default=168, ge=1, le=720)
+    auth_session_idle_hours: int = Field(default=24, ge=1, le=720)
+    #: `last_used_at` is written at most this often (bounds per-request writes).
+    auth_session_touch_seconds: int = Field(default=300, ge=0, le=3600)
+    auth_cookie_name: str = Field(default="sb_session", pattern=r"^[A-Za-z0-9_]{1,64}$")
+    #: None = Secure off only in development/test, ON everywhere else.
+    auth_cookie_secure: bool | None = None
+    auth_cookie_domain: str = ""
+    #: scrypt cost. Default (N=2^15, r=8, p=3; 32 MiB) is an OWASP-listed
+    #: configuration, measured at ~290 ms per hash on the development machine;
+    #: N=2^17/r=8/p=1 measured ~420 ms there. Production-like environments must
+    #: meet `SCRYPT_FLOOR`; tests may lower it for speed.
+    auth_scrypt_n: int = Field(default=2**15, ge=2**4, le=2**20)
+    auth_scrypt_r: int = Field(default=8, ge=1, le=32)
+    auth_scrypt_p: int = Field(default=3, ge=1, le=16)
+    auth_scrypt_maxmem: int = Field(default=64 * 1024 * 1024, ge=1024 * 1024, le=2**31)
+    #: Comma-separated IPs/CIDRs of reverse proxies whose X-Forwarded-For is
+    #: trusted for client-IP rate limiting. Empty = trust no forwarded header.
+    trusted_proxy_ips: str = ""
+
+    # -- Rate limiting (Phase 9, docs/PHASE9_PLAN.md section 11) ---------------
+    # Fixed windows in PostgreSQL; counts are per window. Windows are fixed per
+    # class (see app/services/rate_limit_service.py); limits are configurable.
+    rate_limit_enabled: bool = True
+    rate_limit_login_per_ip: int = Field(default=10, ge=1, le=10_000)  # / 15 min
+    rate_limit_login_per_email: int = Field(default=5, ge=1, le=10_000)  # / 15 min
+    rate_limit_register_per_ip: int = Field(default=5, ge=1, le=10_000)  # / hour
+    rate_limit_graph_per_user: int = Field(default=120, ge=1, le=100_000)  # / minute
+    rate_limit_search_per_user: int = Field(default=120, ge=1, le=100_000)  # / minute
+    rate_limit_agent_per_user: int = Field(default=30, ge=1, le=100_000)  # / hour
+    rate_limit_message_per_user: int = Field(default=120, ge=1, le=100_000)  # / hour
+    rate_limit_ingest_per_user: int = Field(default=20, ge=1, le=100_000)  # / hour
+    rate_limit_write_per_user: int = Field(default=120, ge=1, le=100_000)  # / minute
 
     @field_validator("log_level")
     @classmethod
     def _upper(cls, v: str) -> str:
         return v.upper()
 
+    @field_validator(
+        "auth_mode",
+        "allow_user_id_header",
+        "auth_registration_enabled",
+        "auth_cookie_secure",
+        mode="before",
+    )
+    @classmethod
+    def _empty_means_unset(cls, v: object) -> object:
+        """`AUTH_MODE=` (empty, as in .env.example) means "not set": use the
+        environment-dependent default rather than failing to parse."""
+        return None if isinstance(v, str) and not v.strip() else v
+
+    @field_validator("trusted_proxy_ips")
+    @classmethod
+    def _valid_proxy_networks(cls, v: str) -> str:
+        import ipaddress
+
+        for item in v.split(","):
+            if item.strip():
+                ipaddress.ip_network(item.strip(), strict=False)  # ValueError -> refuse
+        return v
+
     @model_validator(mode="after")
     def _check_production_requirements(self) -> Settings:
-        if self.app_env == "production" and self.allow_user_id_header:
-            # Fail loudly rather than silently shipping a trust-the-client identity.
+        if self.auth_mode is not None and self.allow_user_id_header is not None:
+            wants_header = self.auth_mode == "dev_header"
+            if wants_header != self.allow_user_id_header:
+                raise ValueError(
+                    "AUTH_MODE and ALLOW_USER_ID_HEADER contradict each other; set only "
+                    "AUTH_MODE (ALLOW_USER_ID_HEADER is a deprecated alias)."
+                )
+        if self.cors_allow_vercel_previews and not self.cors_vercel_project:
             raise ValueError(
-                "ALLOW_USER_ID_HEADER must be false when APP_ENV=production. "
-                "The X-User-Id header is a Phase 1 development placeholder and is not "
-                "an authentication mechanism."
+                "CORS_ALLOW_VERCEL_PREVIEWS=true requires CORS_VERCEL_PROJECT=<project slug>: "
+                "admitting every *.vercel.app site as a credentialed origin is unsafe."
             )
+        if self.is_production_like:
+            # Fail loudly rather than silently shipping a trust-the-client identity
+            # or a weak browser boundary (PHASE9_PLAN.md section 12). Any APP_ENV
+            # other than development/test counts -- a typo is not a bypass.
+            env = f"APP_ENV={self.app_env!r}"
+            if self.allow_user_id_header:
+                raise ValueError(
+                    f"ALLOW_USER_ID_HEADER must be false when {env}. The X-User-Id header "
+                    "is a development placeholder and is not an authentication mechanism."
+                )
+            if self.effective_auth_mode != "session":
+                raise ValueError(f"AUTH_MODE must be 'session' when {env}.")
+            if not self.cookie_secure:
+                raise ValueError(f"AUTH_COOKIE_SECURE must be true when {env}.")
+            if not self.allowed_origins:
+                raise ValueError(
+                    f"FRONTEND_URL or CORS_ORIGINS must list the browser origin(s) when {env}: "
+                    "the CSRF Origin check and credentialed CORS need an explicit allow-list."
+                )
+            if not self.scrypt_meets_floor:
+                raise ValueError(
+                    f"AUTH_SCRYPT_N/R/P are below the OWASP floor when {env} "
+                    "(need N>=2^15, r>=8 and N*r*p >= 2^15*8*3)."
+                )
+        if 128 * self.auth_scrypt_n * self.auth_scrypt_r * 2 > self.auth_scrypt_maxmem:
+            raise ValueError("AUTH_SCRYPT_MAXMEM is too small for AUTH_SCRYPT_N/R.")
         if self.llm_provider not in _KNOWN_PROVIDERS:
             raise ValueError(
                 f"LLM_PROVIDER must be one of {sorted(_KNOWN_PROVIDERS)}, got {self.llm_provider!r}"
@@ -302,10 +402,40 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origin_regex(self) -> str | None:
-        """Regex allowing Vercel preview deployments, which have generated hostnames."""
-        if not self.cors_allow_vercel_previews:
+        """Regex allowing ONE Vercel project's preview deployments (generated
+        hostnames `<project>-<hash>-<scope>.vercel.app`). Never all of vercel.app."""
+        if not self.cors_allow_vercel_previews or not self.cors_vercel_project:
             return None
-        return r"https://.*\.vercel\.app"
+        return rf"https://{self.cors_vercel_project}(-[a-z0-9-]+)?\.vercel\.app"
+
+    # -- Phase 9 derived identity/security settings ---------------------------
+
+    @property
+    def is_production_like(self) -> bool:
+        return self.app_env not in {"development", "test"}
+
+    @property
+    def effective_auth_mode(self) -> str:
+        if self.auth_mode is not None:
+            return self.auth_mode
+        return "dev_header" if self.allow_user_id_header else "session"
+
+    @property
+    def registration_enabled(self) -> bool:
+        if self.auth_registration_enabled is not None:
+            return self.auth_registration_enabled
+        return not self.is_production_like
+
+    @property
+    def cookie_secure(self) -> bool:
+        if self.auth_cookie_secure is not None:
+            return self.auth_cookie_secure
+        return self.is_production_like
+
+    @property
+    def scrypt_meets_floor(self) -> bool:
+        n, r, p = self.auth_scrypt_n, self.auth_scrypt_r, self.auth_scrypt_p
+        return n >= 2**15 and r >= 8 and n * r * p >= 2**15 * 8 * 3
 
     @property
     def neo4j_configured(self) -> bool:

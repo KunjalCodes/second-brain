@@ -1,6 +1,6 @@
 # ADR 0005 — `X-User-Id` header as the Phase 1 identity placeholder
 
-**Status:** Accepted (Phase 1) — **temporary; replaced in Phase 9** (authentication moved from Phase 8 to Phase 9 by decision D0, docs/PHASE8_PLAN.md)
+**Status:** **Superseded** by [ADR 0020](0020-postgresql-server-side-sessions.md) (Phase 9). The header survives only as the explicit development mode described in [ADR 0024](0024-development-identity-cannot-run-in-production.md).
 
 ## Context
 

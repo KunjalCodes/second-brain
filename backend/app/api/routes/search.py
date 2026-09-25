@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.deps import CurrentUser, HybridRetrievalServiceDep
+from app.api.deps import (
+    RATE_LIMIT_SEARCH,
+    CurrentUser,
+    HybridRetrievalServiceDep,
+)
 from app.schemas.search import (
     RetrievalExplanationView,
     SearchRequest,
@@ -19,7 +23,12 @@ from app.schemas.search import (
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-@router.post("", response_model=SearchResponse, summary="Hybrid graph + vector + keyword search")
+@router.post(
+    "",
+    dependencies=[RATE_LIMIT_SEARCH],
+    response_model=SearchResponse,
+    summary="Hybrid graph + vector + keyword search",
+)
 async def search(
     payload: SearchRequest,
     user_id: CurrentUser,

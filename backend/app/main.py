@@ -27,8 +27,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.cookies import clear_session_cookie
 from app.api.routes import (
     agent,
+    auth,
     conversations,
     documents,
     embeddings,
@@ -126,14 +128,22 @@ def create_app() -> FastAPI:
     # CORS for a Vercel-hosted frontend. Explicit origins come from FRONTEND_URL and
     # CORS_ORIGINS; the regex additionally admits Vercel preview deployments, whose
     # hostnames are generated per commit and cannot be enumerated in advance.
+    # Phase 9 (ADR 0022): credentialed CORS admits ONLY explicit origins (plus,
+    # if opted in, one named Vercel project's previews -- never all of
+    # vercel.app), and only the headers the API actually reads.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
         allow_origin_regex=settings.allowed_origin_regex,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=[REQUEST_ID_HEADER],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            REQUEST_ID_HEADER,
+            *(["X-User-Id"] if settings.effective_auth_mode == "dev_header" else []),
+        ],
+        expose_headers=[REQUEST_ID_HEADER, "Retry-After"],
     )
 
     @app.middleware("http")
@@ -152,7 +162,12 @@ def create_app() -> FastAPI:
         payload["error"]["request_id"] = getattr(request.state, "request_id", None)
         if exc.status_code >= 500:
             logger.error("%s: %s", exc.code, exc.message, extra={"details": exc.details})
-        return JSONResponse(status_code=exc.status_code, content=payload)
+        response = JSONResponse(
+            status_code=exc.status_code, content=payload, headers=exc.headers or None
+        )
+        if exc.clear_session_cookie:
+            clear_session_cookie(response, settings)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
@@ -193,6 +208,7 @@ def create_app() -> FastAPI:
 
     prefix = settings.api_prefix.rstrip("/")
     app.include_router(health.router, prefix=prefix)
+    app.include_router(auth.router, prefix=prefix)
     app.include_router(memories.router, prefix=prefix)
     app.include_router(entities.router, prefix=prefix)
     app.include_router(graph.router, prefix=prefix)

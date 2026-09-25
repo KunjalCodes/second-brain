@@ -503,6 +503,19 @@ every module holding Cypher-shaped constants, and fails if any is not
 audited, so a new repository module cannot silently escape the
 `$user_id` rule.
 
+**Phase 9** (ADRs 0020–0024): `authenticated_user` is now real. The one
+identity dependency (`app.api.deps.get_auth_context` →
+`get_current_user_id` → `CurrentUser`) resolves a verified server-side
+session (PostgreSQL, token stored only as SHA-256) to the account's
+`users.id`, the unchanged memory-ownership key. So
+`requested_user == authenticated_user` holds by construction: no route,
+service, tool or LLM output can supply a different id. Structural tests
+(`backend/tests/unit/test_auth_audit.py`) enumerate every route (each must be
+public, internal-token or authenticated) and every request, tool-argument and
+LLM-output schema (none may carry an ownership field). The development
+`X-User-Id` placeholder survives only as `AUTH_MODE=dev_header`, which cannot
+start in a production-like environment.
+
 ---
 
 # 16. Document Processing
@@ -693,6 +706,20 @@ Security requirements:
 * rate limiting
 * safe retrieval
 * prompt injection resistance
+
+**Implemented in Phase 9** (docs/API.md section 3a):
+* **Authentication:** local accounts, stdlib-scrypt hashes (hashing off the
+  event loop), and opaque PostgreSQL sessions (7 d absolute / 24 h sliding
+  idle) with immediate revocation.
+* **Browser boundary:** an `HttpOnly` `SameSite=Lax` `Secure` cookie, an
+  Origin check on cookie-authenticated unsafe methods (CSRF), and
+  credentialed CORS for explicit origins only.
+* **Rate limiting:** PostgreSQL fixed windows, each hit in its own
+  transaction, so failed requests still count. The IP is taken from the peer
+  unless a trusted proxy is configured.
+* **Production guards:** the startup validator refuses dev identity,
+  insecure cookies, a missing origin allow-list and weak scrypt in any
+  production-like environment.
 
 ---
 

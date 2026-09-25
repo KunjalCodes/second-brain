@@ -46,6 +46,15 @@ def _test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Iterator[Non
     )
     monkeypatch.setenv("DEV_USER_ID", "test-user")
     monkeypatch.setenv("ALLOW_USER_ID_HEADER", "true")
+    # Phase 9: the pre-existing suite runs in the explicit dev-header mode (the
+    # ALLOW_USER_ID_HEADER line above); session-mode tests switch per test.
+    # Rate limiting needs PostgreSQL and would couple unrelated tests through
+    # shared counters, so it is off by default and enabled by the tests that
+    # exercise it. scrypt cost is lowered for speed -- the production floor is
+    # enforced only for production-like APP_ENV (tests/unit/test_auth_config.py).
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("AUTH_SCRYPT_N", "1024")
+    monkeypatch.setenv("AUTH_SCRYPT_P", "1")
     monkeypatch.setenv("LOG_LEVEL", "CRITICAL")
     # Phase 2: FakeLLMClient is the default provider, so the unit suite never
     # needs an API key or network access.

@@ -7,7 +7,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import CurrentUser, RetrievalServiceDep, SettingsDep
+from app.api.deps import (
+    RATE_LIMIT_GRAPH,
+    RATE_LIMIT_SEARCH,
+    CurrentUser,
+    RetrievalServiceDep,
+    SettingsDep,
+)
 from app.models.domain import (
     Entity,
     EntityDetail,
@@ -23,7 +29,12 @@ router = APIRouter(prefix="/entities", tags=["entities"])
 
 
 # Declared before /{entity_id} so these are not captured as ids.
-@router.get("/search", response_model=EntityListResponse, summary="Search entities by name")
+@router.get(
+    "/search",
+    dependencies=[RATE_LIMIT_SEARCH],
+    response_model=EntityListResponse,
+    summary="Search entities by name",
+)
 async def search_entities(
     user_id: CurrentUser,
     service: RetrievalServiceDep,
@@ -143,6 +154,7 @@ async def get_entity_history(
 
 @router.get(
     "/{entity_id}/graph",
+    dependencies=[RATE_LIMIT_GRAPH],
     response_model=Neighborhood,
     summary="N-hop subgraph around an entity",
 )

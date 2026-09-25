@@ -15,12 +15,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
 
-from app.api.deps import CurrentUser, GraphExplorationServiceDep
+from app.api.deps import (
+    RATE_LIMIT_GRAPH,
+    CurrentUser,
+    GraphExplorationServiceDep,
+)
 from app.models.enums import EntityType
 from app.models.normalization import PREDICATE_PATTERN
 from app.schemas.graph import EdgeEvidence, GraphInclude, GraphSlice, TemporalScope
 
-router = APIRouter(prefix="/graph", tags=["graph"])
+router = APIRouter(prefix="/graph", tags=["graph"], dependencies=[RATE_LIMIT_GRAPH])
 
 #: Stored ids are UUIDs; this accepts them (and other plain identifiers)
 #: while keeping arbitrary text out of every id parameter.

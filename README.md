@@ -597,7 +597,7 @@ The project explores:
 
 # 📌 Status
 
-**Phase 8 complete — bounded, read-only memory graph exploration API (`/graph/*`) for the future Memory Explorer, on top of the Phase 7 evaluation framework.**
+**Phase 9 complete — authentication and session security (server-side PostgreSQL sessions, CSRF/CORS boundary, rate limiting, production-safety guards) on top of the Phase 8 memory graph exploration API.**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -609,10 +609,10 @@ The project explores:
 | 6 | Document ingestion: TXT/Markdown/text-layer PDF, deterministic chunking, provenance, extraction-pipeline reuse (no second decision engine), zero-cost local storage | ✅ Implemented |
 | 7 | Evaluation framework: persistent/resumable evaluation runs (PostgreSQL), generalized `retrieval_necessity` category, strengthened evaluation-only baseline B, real-LLM checkpoint/resume | ✅ Implemented — see `docs/PHASE7_PLAN.md` for measured results and known limitations |
 | 8 | Memory graph exploration API: `/graph/overview`, `/graph/entities/{id}/neighborhood`, `/graph/edges/evidence`, `/graph/memories/{id}/timeline` — one `GraphSlice` shape, server-side budgets with exact truncation flags, current-by-default temporal scope, merge-aware, user-isolated; measured caps on the existing `/entities/{id}/graph` | ✅ Implemented — see `docs/PHASE8_PLAN.md` section 25 for measured results and known limitations |
-| 9 | Authentication + productionization (moved here from Phase 8 by decision D0) | Not started |
+| 9 | Authentication & productization foundation: email/password accounts, opaque server-side sessions (HttpOnly cookie or Bearer), logout/logout-all/password change, CSRF Origin check and narrowed CORS, PostgreSQL rate limiting, production startup guards, operator CLI for legacy ids | ✅ Implemented — see `docs/PHASE9_PLAN.md` section 24 for measured results and known limitations |
 | 10 | Memory Explorer UI + deployment | Not started |
 
-Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE8_PLAN.md` section 25) rather than duplicated here, since they change with every phase.
+Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE9_PLAN.md` section 24) rather than duplicated here, since they change with every phase.
 
 Phase 1 deliberately contains **no LLM, no embeddings, no agent, no document
 ingestion and no authentication**, so the graph-memory core could be verified on

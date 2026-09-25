@@ -63,6 +63,10 @@ _PG_CLEANUP_STATEMENTS = (
     "DELETE FROM documents WHERE user_id = :user_id",
     "DELETE FROM messages WHERE user_id = :user_id",
     "DELETE FROM conversations WHERE user_id = :user_id",
+    # Phase 9: auth rows reference users.id; counters are keyed by user id.
+    "DELETE FROM auth_sessions WHERE user_id = :user_id",
+    "DELETE FROM user_accounts WHERE user_id = :user_id",
+    "DELETE FROM rate_limit_counters WHERE bucket_key LIKE '%:u:' || :user_id",
     "DELETE FROM users WHERE id = :user_id",
 )
 

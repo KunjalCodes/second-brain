@@ -417,27 +417,70 @@ class TestUserIsolationOverHttp:
 
 
 class TestCors:
-    """CORS must admit the Vercel frontend, including preview deployments."""
+    """Phase 9 (ADR 0022): credentialed CORS admits only explicit origins, plus
+    -- if opted in -- ONE named Vercel project's previews. Before Phase 9 every
+    `*.vercel.app` site was admitted (PHASE9_PLAN.md F7); these tests replace
+    the ones that asserted that behaviour."""
 
-    def test_vercel_preview_origin_is_allowed(self, client: TestClient) -> None:
-        response = client.get(
-            "/health", headers={"Origin": "https://brain-git-abc123.vercel.app"}
-        )
-        assert (
-            response.headers.get("access-control-allow-origin")
-            == "https://brain-git-abc123.vercel.app"
-        )
+    @staticmethod
+    def _app(monkeypatch: pytest.MonkeyPatch, **env: str):  # noqa: ANN205
+        from app.core.config import get_settings
+        from app.main import create_app
 
-    def test_preflight_is_answered_for_a_vercel_origin(self, client: TestClient) -> None:
-        response = client.options(
-            "/memories",
-            headers={
-                "Origin": "https://brain.vercel.app",
-                "Access-Control-Request-Method": "POST",
-            },
-        )
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        get_settings.cache_clear()
+        return TestClient(create_app())
+
+    def test_arbitrary_vercel_origin_is_refused_by_default(self, client: TestClient) -> None:
+        response = client.get("/health", headers={"Origin": "https://evil.vercel.app"})
+        assert response.headers.get("access-control-allow-origin") is None
+
+    def test_explicit_frontend_origin_is_allowed_with_credentials(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with self._app(monkeypatch, FRONTEND_URL="https://brain.example.com") as c:
+            response = c.options(
+                "/memories",
+                headers={
+                    "Origin": "https://brain.example.com",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
         assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "https://brain.example.com"
+        assert response.headers["access-control-allow-credentials"] == "true"
         assert "POST" in response.headers.get("access-control-allow-methods", "")
+
+    def test_only_the_named_vercel_project_previews_are_allowed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with self._app(
+            monkeypatch, CORS_ALLOW_VERCEL_PREVIEWS="true", CORS_VERCEL_PROJECT="brain"
+        ) as c:
+            ok = c.get("/health", headers={"Origin": "https://brain-git-abc123-me.vercel.app"})
+            other = c.get("/health", headers={"Origin": "https://evil.vercel.app"})
+            lookalike = c.get("/health", headers={"Origin": "https://evil-brain.vercel.app"})
+        assert ok.headers.get("access-control-allow-origin") == (
+            "https://brain-git-abc123-me.vercel.app"
+        )
+        assert other.headers.get("access-control-allow-origin") is None
+        assert lookalike.headers.get("access-control-allow-origin") is None
+
+    def test_arbitrary_request_headers_are_not_allowed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with self._app(monkeypatch, FRONTEND_URL="https://brain.example.com") as c:
+            response = c.options(
+                "/memories",
+                headers={
+                    "Origin": "https://brain.example.com",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "x-evil",
+                },
+            )
+        assert response.status_code == 400
 
     def test_unlisted_origin_is_not_granted_access(self, client: TestClient) -> None:
         response = client.get("/health", headers={"Origin": "https://evil.example.com"})

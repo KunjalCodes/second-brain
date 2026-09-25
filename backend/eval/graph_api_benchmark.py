@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import event, text  # noqa: E402
 
-from app.api.deps import get_client, get_db  # noqa: E402
+from app.api.deps import get_app_settings, get_client, get_db  # noqa: E402
 from app.core.config import Settings, get_settings  # noqa: E402
 from app.db.engine import Database  # noqa: E402
 from app.graph.connection import GraphClient  # noqa: E402
@@ -392,6 +392,17 @@ async def bench_evidence_and_timeline(db: Database, graph: GraphClient, settings
 async def _canonical_questions(db: Database, graph: GraphClient, user_id: str, ids: dict) -> None:
     fastapi_app.dependency_overrides[get_db] = lambda: db
     fastapi_app.dependency_overrides[get_client] = lambda: graph
+    # Phase 9: these request counts compare endpoint SHAPES, so identity is the
+    # explicit development placeholder (never valid in production) and rate
+    # limiting is off; the auth overhead is measured by eval/auth_benchmark.py.
+    bench_settings = get_settings().model_copy(
+        update={
+            "auth_mode": "dev_header",
+            "allow_user_id_header": True,
+            "rate_limit_enabled": False,
+        }
+    )
+    fastapi_app.dependency_overrides[get_app_settings] = lambda: bench_settings
     headers = {"X-User-Id": user_id}
     try:
         async with AsyncClient(

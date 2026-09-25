@@ -17,6 +17,11 @@ class AppError(Exception):
     status_code: int = 500
     code: str = "internal_error"
 
+    #: Extra response headers (e.g. `Retry-After`, `WWW-Authenticate`).
+    headers: dict[str, str] | None = None
+    #: Phase 9: the error handler clears the session cookie on the response.
+    clear_session_cookie: bool = False
+
     def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.message = message
@@ -156,3 +161,74 @@ class StorageUnavailableError(AppError):
 
     status_code = 503
     code = "storage_unavailable"
+
+
+# -- Phase 9: authentication, authorization boundary, abuse control ---------------
+
+
+class AuthenticationRequiredError(UnauthorizedError):
+    """No valid user credential: missing, malformed, unknown, expired, idle,
+    revoked, or its account is disabled. Deliberately ONE generic code and
+    message -- the specific cause is logged server-side, never returned
+    (docs/PHASE9_PLAN.md section 13)."""
+
+    code = "authentication_required"
+
+    def __init__(self, *, clear_cookie: bool = False) -> None:
+        super().__init__("Authentication is required")
+        self.headers = {"WWW-Authenticate": 'Bearer realm="api"'}
+        self.clear_session_cookie = clear_cookie
+
+
+class InvalidCredentialsError(UnauthorizedError):
+    """Login or password change with a wrong password -- or an unknown email,
+    which is indistinguishable by design."""
+
+    code = "invalid_credentials"
+
+    def __init__(self) -> None:
+        super().__init__("Invalid email or password")
+
+
+class ForbiddenError(AppError):
+    status_code = 403
+    code = "forbidden"
+
+
+class AccountDisabledError(ForbiddenError):
+    """Returned only after a CORRECT password, so it reveals nothing to a
+    caller who does not already hold the credential."""
+
+    code = "account_disabled"
+
+    def __init__(self) -> None:
+        super().__init__("This account is disabled")
+
+
+class OriginNotAllowedError(ForbiddenError):
+    """A cookie-authenticated state-changing request (or a login/register)
+    whose `Origin` is missing or not allowed -- the CSRF boundary."""
+
+    code = "origin_not_allowed"
+
+    def __init__(self) -> None:
+        super().__init__("Request origin is not allowed")
+
+
+class EmailTakenError(ConflictError):
+    code = "email_taken"
+
+    def __init__(self) -> None:
+        super().__init__("An account with this email already exists")
+
+
+class RateLimitedError(AppError):
+    status_code = 429
+    code = "rate_limited"
+
+    def __init__(self, *, limit_class: str, retry_after_seconds: int) -> None:
+        super().__init__(
+            "Too many requests; retry later",
+            details={"limit_class": limit_class, "retry_after_seconds": retry_after_seconds},
+        )
+        self.headers = {"Retry-After": str(retry_after_seconds)}

@@ -53,6 +53,14 @@ FORBIDDEN_NAMES = frozenset({"select", "update", "delete"})
 #:   user's data -- see `app.models.evaluation`'s module docstring), so
 #:   there is no isolation filter to forget in the first place. See its
 #:   module docstring.
+#: * auth_repository.py  is Phase 9's account/session persistence. Rows are found
+#:   BY CREDENTIAL (unique normalised email, or SHA-256 of a session token)
+#:   before any user is known, so there is no caller-supplied user to scope by;
+#:   every write is keyed by the already-resolved user id or session id, and it
+#:   never touches memory data (ADR 0020). See its module docstring.
+#: * rate_limit_repository.py  is Phase 9's abuse-control counter table: no
+#:   user-owned data, only `<class>:<identity>` keys and counts, and one limiter
+#:   must count across all callers (ADR 0023). See its module docstring.
 EXEMPT_FILES = frozenset(
     {
         "sql_base.py",
@@ -60,6 +68,8 @@ EXEMPT_FILES = frozenset(
         "user_repository.py",
         "ingestion_queue.py",
         "evaluation_repository.py",
+        "auth_repository.py",
+        "rate_limit_repository.py",
         "__init__.py",
     }
 )
@@ -135,6 +145,8 @@ def test_exemptions_are_exactly_the_documented_set() -> None:
         "user_repository.py",
         "ingestion_queue.py",
         "evaluation_repository.py",
+        "auth_repository.py",
+        "rate_limit_repository.py",
     }
 
 

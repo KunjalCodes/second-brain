@@ -26,13 +26,21 @@ Two rules for when the app is built:
 1. **Never hard-code `localhost:8000`.** Read `NEXT_PUBLIC_API_URL` in exactly one
    module (`lib/api.ts`) and have every request go through it, so switching
    environments is a config change rather than a code change.
-2. **Send the user identity header.** Until authentication lands in Phase 8 the
-   backend reads `X-User-Id`. That is a development placeholder, not auth -- see
-   `docs/API.md`.
+2. **Authenticate with the session cookie (Phase 9).** Call `GET /auth/me`
+   on load (`401` → show login), `POST /auth/login` to sign in, and send every
+   request with `credentials: "include"`. The session token lives only in an
+   `HttpOnly` cookie -- never read, store or send it from JavaScript, and never
+   put it in `localStorage`. Serve the API **same-origin through a Next.js
+   proxy** (ADR 0022) so the cookie is first-party. `X-User-Id` is a backend
+   development mode only and is refused in production. See `docs/API.md`
+   section 3a.
 
-The backend already allows Vercel preview origins (`https://*.vercel.app`) via
-`CORS_ALLOW_VERCEL_PREVIEWS`, so preview deployments work without extra
-configuration. Add a custom production domain to `CORS_ORIGINS` on the backend.
+With the same-origin proxy no CORS is needed. If a preview deployment must
+call the backend directly, enable `CORS_ALLOW_VERCEL_PREVIEWS` together with
+`CORS_VERCEL_PROJECT=<this project>` -- the backend no longer admits every
+`*.vercel.app` site. The frontend origin must still be listed in `FRONTEND_URL`
+or `CORS_ORIGINS`: the proxy forwards the browser's `Origin`, which the
+backend's CSRF check verifies.
 
 The full endpoint list and response shapes are in [`../docs/API.md`](../docs/API.md),
 and the live OpenAPI schema is served at `<backend>/docs`.

@@ -38,8 +38,16 @@ class TestCorsOrigins:
     def test_empty_configuration_yields_no_origins(self) -> None:
         assert _settings(frontend_url="", cors_origins="").allowed_origins == []
 
-    def test_vercel_preview_regex_enabled_by_default(self) -> None:
-        assert _settings().allowed_origin_regex == r"https://.*\.vercel\.app"
+    def test_vercel_previews_are_off_by_default(self) -> None:
+        """Phase 9 (PHASE9_PLAN.md F7): the old default admitted every
+        *.vercel.app site as a credentialed origin."""
+        assert _settings().allowed_origin_regex is None
+
+    def test_vercel_previews_require_a_named_project(self) -> None:
+        with pytest.raises(PydanticValidationError, match="CORS_VERCEL_PROJECT"):
+            _settings(cors_allow_vercel_previews=True)
+        s = _settings(cors_allow_vercel_previews=True, cors_vercel_project="brain")
+        assert s.allowed_origin_regex == r"https://brain(-[a-z0-9-]+)?\.vercel\.app"
 
     def test_vercel_preview_regex_can_be_disabled(self) -> None:
         assert _settings(cors_allow_vercel_previews=False).allowed_origin_regex is None
@@ -79,7 +87,15 @@ class TestProductionGuards:
             _settings(app_env="production", allow_user_id_header=True)
 
     def test_production_is_allowed_with_the_header_disabled(self) -> None:
-        s = _settings(app_env="production", allow_user_id_header=False)
+        # Phase 9: a production-like environment also needs an explicit browser
+        # origin allow-list (tests/unit/test_auth_config.py covers every guard).
+        s = _settings(
+            app_env="production",
+            allow_user_id_header=False,
+            frontend_url="https://brain.example.com",
+            auth_scrypt_n=2**15,
+            auth_scrypt_p=3,
+        )
         assert s.app_env == "production"
 
     def test_development_allows_the_header(self) -> None:

@@ -306,17 +306,151 @@ on `$user_id`**. This is enforced three ways:
 3. Cross-user access returns **404, not 403**, so the API never confirms that another
    user's record exists.
 
-**Phase 1 has no authentication.** The user id comes from the `X-User-Id` header,
-falling back to `DEV_USER_ID`. This is a placeholder, not a security boundary — see
-[ADR 0005](adr/0005-phase1-identity-placeholder.md). Startup fails if
-`APP_ENV=production` while `ALLOW_USER_ID_HEADER=true`.
+**Identity (Phase 9).** The `user_id` every query filters on is derived ONLY
+from a verified server-side session (section 3a). The pre-Phase-9 `X-User-Id`
+header survives solely as the explicit development mode `AUTH_MODE=dev_header`,
+which cannot start in any production-like environment
+([ADR 0024](adr/0024-development-identity-cannot-run-in-production.md);
+[ADR 0005](adr/0005-phase1-identity-placeholder.md) is superseded).
+
+---
+
+# 3a. Authentication (Phase 9)
+
+Local email + password accounts; **server-side opaque sessions** stored in
+PostgreSQL (only the token's SHA-256), password hashes by the standard
+library's scrypt. No JWT, no refresh tokens, no OAuth, no email flows
+([ADR 0020](adr/0020-postgresql-server-side-sessions.md)).
+
+## Identity model
+
+| | |
+|---|---|
+| Memory ownership id | `users.id` — unchanged; the ONE key every PostgreSQL row, Neo4j node/edge and storage directory is owned by. |
+| Login identity | `user_accounts.email_normalized` (trimmed, lower-cased, unique) — separate from ownership ([ADR 0021](adr/0021-auth-identity-separate-from-memory-ownership.md)). |
+| Who chooses `user_id` | Always the server: UUID4 at registration, or an existing legacy id attached by the operator CLI. No request body, query, path, header, tool argument or LLM output can set it (enforced by structural tests). |
+
+## Credentials
+
+| Client | Transport |
+|---|---|
+| Browser | `sb_session` cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age=604800`, `Secure` outside development/test, host-only. JavaScript never sees the token. |
+| Scripts, tests, eval | `Authorization: Bearer <token>`; request the token with `"token_in_body": true` at login. |
+
+`Authorization` wins over the cookie. Any presented credential is always
+verified (a malformed or unknown one is `401`, never a silent fallback), and
+when one is present `X-User-Id` is ignored.
+
+**Sessions** last at most **7 days** (absolute) and expire after **24 hours
+idle**; the idle window slides on use (`last_used_at` is written at most every
+`AUTH_SESSION_TOUCH_SECONDS`, default 300). Boundaries are exact: at
+`expires_at`, or `last_used_at + 24h`, the session is refused. Every login
+creates a new session (no fixation); several concurrent sessions per account
+are allowed.
+
+## Endpoints
+
+| Method | Path | Auth | Success | Notes |
+|---|---|---|---|---|
+| `POST` | `/auth/register` | none | `201 {"user"}` | `{"email","password"}` (`extra` fields incl. `user_id` → 422). Password 12–128 chars, not the email. `409 email_taken` on duplicate (accepted enumeration trade-off, rate-limited). **Disabled by default in any production-like environment** → identical to an unknown route (`404 {"detail":"Not Found"}`). Does not log in. |
+| `POST` | `/auth/login` | none | `200 {"user","session":{"expires_at","idle_expires_at"},"token"?}` + cookie | `{"email","password","token_in_body"?}`. Wrong password and unknown email are the same `401 invalid_credentials` with the same scrypt work. `403 account_disabled` only after a correct password. Re-hashes on login if the configured scrypt cost changed. |
+| `POST` | `/auth/logout` | optional | `204` | Revokes the presented session; always clears the cookie; idempotent. |
+| `POST` | `/auth/logout-all` | session | `204` | Revokes **every** session of the account. |
+| `POST` | `/auth/password` | session | `204` | `{"current_password","new_password"}`; wrong current → `401` (counts toward the login limits); revokes every **other** session, keeps this one. |
+| `GET` | `/auth/me` | any | `200 {"user":{"id","email","status","created_at"},"session","auth_mode"}` | The Phase 10 bootstrap call. Never returns hash or token material. In dev-header mode: `email: null`, `session: null`, `auth_mode: "dev_header"`. |
+
+There is deliberately **no** refresh endpoint (the idle window slides), no
+session listing (only logout-all), no password-reset email and no email
+verification. Password reset and account disable/enable are operator-only
+(section 3a "Operator CLI").
+
+## Errors
+
+| Status | `error.code` | When |
+|---|---|---|
+| `401` | `authentication_required` | Missing, malformed, unknown, expired, idle, revoked, or disabled-account credential — one generic body (the specific cause is logged server-side, never returned). Carries `WWW-Authenticate: Bearer realm="api"`; an invalid cookie is also cleared. |
+| `401` | `invalid_credentials` | Login / password change with a wrong password (or unknown email). |
+| `403` | `origin_not_allowed` | Cookie-authenticated `POST/PUT/PATCH/DELETE` (or a login/register from a browser) whose `Origin` is missing or not allowed. |
+| `403` | `account_disabled` | Correct password, disabled account. |
+| `404` | `not_found` | Unchanged: another user's id, or none. Never 403. |
+| `429` | `rate_limited` | With `Retry-After: <seconds>` and `details.limit_class`. |
+
+## Browser security boundary (CSRF, CORS)
+
+* **CSRF:** a cookie-authenticated state-changing request must carry an
+  `Origin` that is an explicitly allowed origin (`FRONTEND_URL`, `CORS_ORIGINS`),
+  the configured Vercel project's preview, or this API's own origin — otherwise
+  `403`. `SameSite=Lax` is the second layer. Bearer requests are exempt (not
+  ambient credentials). No CSRF tokens are needed
+  ([ADR 0022](adr/0022-cookie-origin-policy-and-same-site-topology.md)).
+* **CORS:** credentials are allowed only for explicit origins. The pre-Phase-9
+  default that admitted **every** `*.vercel.app` site was removed;
+  `CORS_ALLOW_VERCEL_PREVIEWS=true` now requires `CORS_VERCEL_PROJECT=<slug>`
+  and admits only `https://<slug>(-…)?.vercel.app`. Allowed request headers are
+  `Authorization`, `Content-Type`, `X-Request-ID` (plus `X-User-Id` in
+  dev-header mode only).
+* **Topology:** the Phase 10 frontend is served same-site through a Next.js
+  same-origin proxy (approved Q3), so the host-only `SameSite=Lax` cookie works
+  and browsers' third-party-cookie blocking does not apply.
+
+## Rate limits
+
+PostgreSQL fixed-window counters, each hit committed in its **own**
+transaction — so a request that fails (e.g. a wrong-password `401`) still
+counts ([ADR 0023](adr/0023-postgresql-rate-limiting.md)). Limits are per
+window; the second request past a limit gets `429`.
+
+| Class | Endpoints | Keyed by | Default |
+|---|---|---|---|
+| `auth_login_ip` + `auth_login_email` | `POST /auth/login`, `POST /auth/password` | client IP **and** SHA-256(email); both counted on every attempt | 10 / 15 min per IP; 5 / 15 min per email |
+| `auth_register` | `POST /auth/register` | client IP | 5 / hour |
+| `graph` | `/graph/*`, `GET /entities/{id}/graph` | user | 120 / min |
+| `search` | `POST /search`, `GET /memories/search`, `GET /entities/search` | user | 120 / min |
+| `agent` | `POST /conversations/{id}/agent-turn` | user | 30 / hour |
+| `message` | `POST /conversations/{id}/messages` | user | 120 / hour |
+| `ingest` | `POST /documents` | user | 20 / hour |
+| `write` | `POST /memories`, `PATCH /memories/{id}`, `POST /memories/{id}/invalidate`, review `POST`s | user | 120 / min |
+
+User classes run **after** authentication (an anonymous flood gets cheap `401`s
+and never consumes a user's quota) and **before** body validation (an invalid
+request still counts). The Phase 8 per-request graph budgets are unchanged and
+remain the hard ceiling on work per request.
+
+**Client IP:** the direct peer address. `X-Forwarded-For` is consulted ONLY
+when the peer is in `TRUSTED_PROXY_IPS` (IPs/CIDRs), taking the right-most
+non-proxy hop; from any other peer it is ignored, so a client cannot choose its
+own bucket. Behind the Next.js proxy, set `TRUSTED_PROXY_IPS` to the proxy's
+address or every client shares one per-IP bucket (the per-email limit does not
+depend on IP).
+
+## Development and test identity
+
+`AUTH_MODE=dev_header` (or the deprecated `ALLOW_USER_ID_HEADER=true`)
+restores the pre-Phase-9 placeholder: identity from `X-User-Id`, falling back
+to `DEV_USER_ID`. A presented session credential still wins. Startup **fails**
+in any `APP_ENV` other than `development`/`test` if it is selected, and also if
+cookies are not `Secure`, no browser origin is configured, or the scrypt cost
+is below the OWASP floor. The pre-Phase-9 test suite runs in dev-header mode;
+Phase 9 tests run in session mode.
+
+## Operator CLI
+
+`scripts/manage_users.py` (run from `backend/`; talks to PostgreSQL directly,
+no HTTP): `create --email E [--user-id ID]`, `disable`, `enable`,
+`reset-password`, `revoke-sessions`. Passwords are read from a no-echo prompt
+or one stdin line (`--password-stdin`), **never** from arguments.
+`create --user-id dev-user` / `demo-user` attaches a login to an **existing**
+ownership id without touching its data; it refuses ids with no existing data
+and ids that already have an account (so it cannot reassign ownership).
+Disabling revokes every session immediately.
 
 ---
 
 # 4. Endpoints
 
-All requests take an optional `X-User-Id` header. Every response carries
-`X-Request-ID`. Live OpenAPI schema at `/docs`.
+Every endpoint except `/health*` and `/auth/{register,login,logout}` requires a
+session credential (section 3a). Every response carries `X-Request-ID`. Live
+OpenAPI schema at `/docs` (public; schema only, no user data).
 
 ## Memories
 
@@ -455,7 +589,7 @@ failure is asynchronous and never reaches a request (docs/adr/0008).
 
 # 4a. Conversation, extraction and provenance endpoints (Phase 2)
 
-All under the same `X-User-Id` header as Phase 1, except the internal router.
+All require the same session credential as every other user route (section 3a), except the internal router (operator `X-Internal-Token`).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -602,8 +736,8 @@ PostgreSQL-only extraction claim step.
 
 ## Review workflow (Phase 4, ADR 0010, PHASE4_PLAN.md sections 6/9-12/15)
 
-Every endpoint below is user-scoped through `X-User-Id` like the rest of the
-API. Write endpoints require `if_version` (optimistic concurrency): a stale
+Every endpoint below is user-scoped through the authenticated session like the
+rest of the API. Write endpoints require `if_version` (optimistic concurrency): a stale
 value is rejected with `409 conflict` naming the current version, never a
 silent overwrite. Repeating an already-applied action with the same or a
 stale `if_version` is idempotent — it returns the existing state rather than
@@ -718,8 +852,8 @@ embedding backfill sweep.
 
 A bounded, **read-only** contract for a Memory Explorer UI
 (`docs/PHASE8_PLAN.md`). Every endpoint is `GET` and user-scoped through the
-same `X-User-Id` identity seam as the rest of the API (authentication is
-Phase 9). No endpoint accepts Cypher, labels, relationship types or
+same authenticated identity as the rest of the API (section 3a) and rate-limited
+as class `graph`. No endpoint accepts Cypher, labels, relationship types or
 free-form filter expressions, and none writes to either store.
 
 | Method | Path | Purpose |
@@ -1013,6 +1147,22 @@ cd backend && uv run uvicorn app.main:app --reload --port 8000
 Then `http://localhost:8000/docs`. The app never binds a port itself; managed hosts
 supply `$PORT` (see `backend/Procfile`).
 
+**Authentication (Phase 9).** Apply migrations first (`uv run alembic upgrade
+head` adds `user_accounts`, `auth_sessions`, `rate_limit_counters`), then either:
+
+```bash
+# session mode (the default): create an account, then log in
+uv run python ../scripts/manage_users.py create --email you@example.com
+# ...or give the seeded demo data a login, keeping its ownership id:
+uv run python ../scripts/manage_users.py create --email demo@example.com --user-id demo-user
+curl -s -X POST localhost:8000/auth/login -H 'content-type: application/json' \
+     -d '{"email":"you@example.com","password":"...","token_in_body":true}'
+# then send: Authorization: Bearer <token>
+```
+
+or keep the pre-Phase-9 workflow for quick local poking with
+`AUTH_MODE=dev_header` (never valid outside development/test).
+
 ## Seed the demo data
 
 ```bash
@@ -1130,8 +1280,8 @@ See `.env.example` for the full annotated list. Required regardless of phase:
 | `CORS_ALLOW_VERCEL_PREVIEWS` | Default `true`; admits `https://*.vercel.app` |
 | `GRAPH_MAX_HOPS` | Default `4`; caps traversal depth |
 | `SEARCH_MAX_LIMIT` | Default `200` |
-| `DEV_USER_ID` | Phase 1 fallback identity |
-| `ALLOW_USER_ID_HEADER` | Must be `false` when `APP_ENV=production` |
+| `DEV_USER_ID` | Fallback identity in `AUTH_MODE=dev_header` only |
+| `ALLOW_USER_ID_HEADER` | Deprecated alias of `AUTH_MODE=dev_header`; refused in any production-like `APP_ENV` |
 | `NEO4J_MAX_TRANSACTION_RETRY_TIME` | Default `5.0s`; the driver default of 30s would hang requests during an outage |
 
 ## Phase 2 additions
@@ -1183,6 +1333,22 @@ See `.env.example` for the full annotated list. Required regardless of phase:
 | `GRAPH_EXPLORE_MAX_EDGES` | Default `400`, hard max `3000` — edge budget per slice |
 | `GRAPH_EXPLORE_MAX_HOPS` | Default `2`, hard max `3` — neighborhood depth |
 | `GRAPH_EXPLORE_MAX_MEMORIES_PER_ENTITY` | Default `5`, hard max `25` — memory nodes per entity with `include=memories` |
+
+## Phase 9 additions
+
+| Variable | Notes |
+|---|---|
+| `AUTH_MODE` | `session` (default) or `dev_header` (development/test only) |
+| `AUTH_REGISTRATION_ENABLED` | Empty = on in development/test, **off** elsewhere |
+| `AUTH_SESSION_TTL_HOURS` / `AUTH_SESSION_IDLE_HOURS` / `AUTH_SESSION_TOUCH_SECONDS` | `168` / `24` / `300` |
+| `AUTH_COOKIE_NAME` / `AUTH_COOKIE_SECURE` / `AUTH_COOKIE_DOMAIN` | `sb_session` / empty = on outside development/test / host-only |
+| `AUTH_SCRYPT_N` / `_R` / `_P` / `_MAXMEM` | `32768` / `8` / `3` / `67108864`; production floor N≥2^15, r≥8, N·r·p ≥ 2^15·8·3 |
+| `TRUSTED_PROXY_IPS` | IPs/CIDRs whose `X-Forwarded-For` is trusted; empty = none |
+| `CORS_VERCEL_PROJECT` | Required when `CORS_ALLOW_VERCEL_PREVIEWS=true` (now default `false`) |
+| `RATE_LIMIT_ENABLED` / `RATE_LIMIT_*` | See section 3a "Rate limits" |
+
+`AUTH_SECRET` was removed from `.env.example`: server-side opaque sessions need
+no signing secret.
 
 `REDIS_URL` and `STORAGE_*` are present in `.env.example` for later phases and are
 **unused through Phase 4**.
