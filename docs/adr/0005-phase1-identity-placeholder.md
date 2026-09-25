@@ -1,11 +1,11 @@
 # ADR 0005 — `X-User-Id` header as the Phase 1 identity placeholder
 
-**Status:** Accepted (Phase 1) — **temporary; replaced in Phase 8**
+**Status:** Accepted (Phase 1) — **temporary; replaced in Phase 9** (authentication moved from Phase 8 to Phase 9 by decision D0, docs/PHASE8_PLAN.md)
 
 ## Context
 
 `CLAUDE.md` section 26 requires authentication with per-user isolation and says never
-to trust the frontend for it. Authentication is Phase 8. But `ARCHITECTURE.md`
+to trust the frontend for it. Authentication is Phase 9. But `ARCHITECTURE.md`
 section 15 requires `user_id` on every record from the start, and namespacing
 retrofitted later would mean migrating every node and rewriting every query.
 
@@ -18,7 +18,7 @@ Guard-rails, because a development placeholder that reaches production is a tota
 authorization bypass:
 
 1. Resolution happens in exactly one function, `app.api.deps.get_current_user_id`.
-   Phase 8 replaces that function and nothing else.
+   Phase 9 replaces that function and nothing else.
 2. Startup **fails** if `APP_ENV=production` and `ALLOW_USER_ID_HEADER=true`.
 3. Cross-user access returns **404, not 403**, so the API never confirms that
    another user's record exists.
@@ -33,8 +33,8 @@ authorization bypass:
 
 * **This is not authentication and provides no security.** Any caller can claim any
   user id. It exists so that the isolation *mechanism* is built, exercised and tested
-  from the first commit, leaving Phase 8 to supply real identity.
-* The backend must not be exposed to untrusted callers before Phase 8.
+  from the first commit, leaving Phase 9 to supply real identity.
+* The backend must not be exposed to untrusted callers before Phase 9.
 * Isolation is enforced in application code. Once real auth exists, Neo4j has no
   row-level security equivalent, so the repository chokepoint plus the static audit
   remain the enforcement mechanism — which is why both are tested.

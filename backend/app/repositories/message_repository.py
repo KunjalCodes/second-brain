@@ -108,6 +108,15 @@ class MessageRepository(UserScopedRepository):
             return None
         return _to_domain(row)
 
+    async def get_many(self, *, message_ids: list[str]) -> dict[str, Message]:
+        """Batched `get` (Phase 8 evidence endpoint): one query for many ids,
+        user-scoped like every other read; unknown or foreign ids are absent."""
+        if not message_ids:
+            return {}
+        stmt = self._select(MessageRow).where(MessageRow.id.in_(message_ids))
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return {row.id: _to_domain(row) for row in rows}
+
     async def list(
         self, *, conversation_id: str, limit: int, offset: int
     ) -> list[Message]:

@@ -1,7 +1,7 @@
 """FastAPI dependencies.
 
 The identity dependency is the single place the request's user id is determined.
-Replacing the Phase 1 header placeholder with real authentication in Phase 8 means
+Replacing the Phase 1 header placeholder with real authentication in Phase 9 means
 changing `get_current_user_id` and nothing else.
 """
 
@@ -24,11 +24,13 @@ from app.graph.connection import GraphClient, get_graph_client
 from app.llm.base import LLMClient
 from app.llm.factory import get_llm_client
 from app.repositories.entity_repository import EntityRepository
+from app.repositories.graph_repository import GraphRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.services.agent_service import AgentService
 from app.services.conversation_service import ConversationService
 from app.services.document_service import DocumentService
 from app.services.extraction_status_service import ExtractionStatusService
+from app.services.graph_exploration_service import GraphExplorationService
 from app.services.hybrid_retrieval_service import HybridRetrievalService
 from app.services.memory_service import MemoryService
 from app.services.provenance_service import ProvenanceService
@@ -82,7 +84,7 @@ def get_current_user_id(
 ) -> str:
     """Resolve the requesting user.
 
-    **This is not authentication.** Phase 1 has no auth (it is Phase 8), so the user
+    **This is not authentication.** Phase 1 has no auth (it is Phase 9), so the user
     id is taken from the `X-User-Id` header and falls back to `DEV_USER_ID`. It exists
     so that every record is namespaced from the first commit and so the isolation
     tests are meaningful; it must not be exposed to untrusted callers. `APP_ENV=production`
@@ -90,7 +92,7 @@ def get_current_user_id(
     """
     if not settings.allow_user_id_header:
         raise ConfigurationError(
-            "Authentication is not implemented yet (Phase 8). Set "
+            "Authentication is not implemented yet (Phase 9). Set "
             "ALLOW_USER_ID_HEADER=true for development use."
         )
     user_id = (x_user_id or settings.dev_user_id).strip()
@@ -111,7 +113,12 @@ def get_retrieval_service(
     client: Annotated[GraphClient, Depends(get_client)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> RetrievalService:
-    return RetrievalService(EntityRepository(client), max_hops=settings.graph_max_hops)
+    return RetrievalService(
+        EntityRepository(client),
+        max_hops=settings.graph_max_hops,
+        max_nodes=settings.graph_max_nodes,
+        max_edges=settings.graph_max_edges,
+    )
 
 
 def get_conversation_service(
@@ -134,6 +141,22 @@ def get_provenance_service(
     memory_service: Annotated[MemoryService, Depends(get_memory_service)],
 ) -> ProvenanceService:
     return ProvenanceService(session, memory_service)
+
+
+def get_graph_exploration_service(
+    client: Annotated[GraphClient, Depends(get_client)],
+    retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
+    memory_service: Annotated[MemoryService, Depends(get_memory_service)],
+    provenance_service: Annotated[ProvenanceService, Depends(get_provenance_service)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> GraphExplorationService:
+    return GraphExplorationService(
+        repository=GraphRepository(client),
+        retrieval=retrieval_service,
+        memory=memory_service,
+        provenance=provenance_service,
+        settings=settings,
+    )
 
 
 def get_hybrid_retrieval_service(
@@ -262,6 +285,9 @@ ReviewServiceDep = Annotated[ReviewService, Depends(get_review_service)]
 ReviewActionServiceDep = Annotated[ReviewActionService, Depends(get_review_action_service)]
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
 ToolDependenciesDep = Annotated[ToolDependencies, Depends(get_tool_dependencies)]
+GraphExplorationServiceDep = Annotated[
+    GraphExplorationService, Depends(get_graph_exploration_service)
+]
 DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 LLMClientDep = Annotated[LLMClient, Depends(get_llm)]
 EmbeddingClientDep = Annotated[EmbeddingClient, Depends(get_embeddings)]

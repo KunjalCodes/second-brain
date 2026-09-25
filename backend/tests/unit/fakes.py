@@ -308,8 +308,16 @@ class FakeEntityRepository:
         )
 
     async def search(
-        self, *, user_id: str, query: str, limit: int, offset: int
+        self,
+        *,
+        user_id: str,
+        query: str,
+        limit: int,
+        offset: int,
+        include_merged: bool = False,
     ) -> list[Entity]:
+        # This fake has no MERGED_INTO redirects, so `include_merged` cannot
+        # change its result; the real filter is covered against Neo4j.
         matches = [
             e
             for (uid, _), e in self._store.entities.items()
@@ -381,6 +389,8 @@ class FakeEntityRepository:
         hops: int,
         max_hops: int,
         excluded_statuses: list[str],
+        max_nodes: int = 1000,
+        max_edges: int = 5000,
     ) -> Neighborhood:
         from app.repositories.entity_repository import validate_hops
 
@@ -411,14 +421,22 @@ class FakeEntityRepository:
             for (uid, _), e in self._store.entities.items()
             if uid == user_id and e.id in distance and e.id != root.id
         ]
-        nodes.sort(key=lambda n: (n.hops, n.entity.name))
-        ids = set(distance)
-        rels = [
-            r
-            for r in edges
-            if r.source_entity_id in ids and r.target_entity_id in ids
-        ]
-        return Neighborhood(root=root, hops=safe_hops, nodes=nodes, relationships=rels)
+        nodes.sort(key=lambda n: (n.hops, n.entity.name, n.entity.id))
+        truncated = len(nodes) > max_nodes
+        nodes = nodes[:max_nodes]
+        ids = {root.id, *(n.entity.id for n in nodes)}
+        rels = sorted(
+            (r for r in edges if r.source_entity_id in ids and r.target_entity_id in ids),
+            key=lambda r: r.id,
+        )
+        truncated = truncated or len(rels) > max_edges
+        return Neighborhood(
+            root=root,
+            hops=safe_hops,
+            nodes=nodes,
+            relationships=rels[:max_edges],
+            truncated=truncated,
+        )
 
     def _by_id(self, user_id: str, entity_id: str) -> Entity | None:
         for (uid, _), entity in self._store.entities.items():

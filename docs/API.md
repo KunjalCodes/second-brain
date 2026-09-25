@@ -382,13 +382,13 @@ create a new entity.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/entities/search?q=` | Substring search over names and aliases |
+| `GET` | `/entities/search?q=` | Substring search over names and aliases. Merged-away entities are hidden unless `include_merged=true` (Phase 8, D2); their names remain searchable as aliases of the canonical entity and their ids still resolve |
 | `GET` | `/entities/by-name?name=` | Exact resolution by normalized name |
 | `GET` | `/entities/{id}` | Entity with memory and relationship counts |
 | `GET` | `/entities/{id}/relationships` | Incident edges (`direction`, `as_of`) |
 | `GET` | `/entities/{id}/memories` | Memories mentioning the entity |
 | `GET` | `/entities/{id}/history` | **Current vs historical state** (`as_of`) |
-| `GET` | `/entities/{id}/graph?hops=N` | N-hop subgraph, bounded by `GRAPH_MAX_HOPS` |
+| `GET` | `/entities/{id}/graph?hops=N` | N-hop subgraph. Depth bounded by `GRAPH_MAX_HOPS`; result bounded by `GRAPH_MAX_NODES` / `GRAPH_MAX_EDGES` (Phase 8, D1), with `truncated: true` when a cap cut it. No temporal filter: superseded edges are included. For a Memory Explorer use `/graph/*` (section 4c) instead |
 
 ### `GET /entities/{id}/history`
 
@@ -714,6 +714,243 @@ embedding backfill sweep.
 
 ---
 
+# 4c. Memory graph exploration API (Phase 8)
+
+A bounded, **read-only** contract for a Memory Explorer UI
+(`docs/PHASE8_PLAN.md`). Every endpoint is `GET` and user-scoped through the
+same `X-User-Id` identity seam as the rest of the API (authentication is
+Phase 9). No endpoint accepts Cypher, labels, relationship types or
+free-form filter expressions, and none writes to either store.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/graph/overview` | Bounded landing slice |
+| `GET` | `/graph/entities/{entity_id}/neighborhood` | Bounded, incremental expansion around one entity |
+| `GET` | `/graph/edges/evidence` | One relationship → its asserting memories → their provenance |
+| `GET` | `/graph/memories/{memory_id}/timeline` | One memory's supersession / duplicate / conflict chain |
+
+## The `GraphSlice` response
+
+`overview`, `neighborhood` and `timeline` return one shape:
+
+```json
+{
+  "root": "<entity or memory id | null for overview>",
+  "resolved_from": "<the id asked for, if a MERGED_INTO redirect was followed | null>",
+  "redirect_depth": 0,
+  "temporal_scope": "current | as_of | all",
+  "as_of": "<the instant temporal_state was computed at>",
+  "budget": {"max_nodes": 150, "max_edges": 400, "max_hops": 1, "max_memories_per_entity": null},
+  "truncated_nodes": false,
+  "truncated_edges": false,
+  "truncated_memories": false,
+  "nodes": [{"id": "...", "kind": "entity | memory | source", "label": "...", "...": "..."}],
+  "edges": [{"id": "...", "kind": "relates_to | mentions | supersedes | conflicts_with | duplicate_of | derived_from",
+             "source": "...", "target": "...", "...": "..."}]
+}
+```
+
+* **Complete vs partial is always explicit.** `truncated_nodes` /
+  `truncated_edges` are exact: the server fetches one more than the budget,
+  so `false` means nothing in scope was left out. `truncated_memories` is
+  set when `include=memories` hit the per-entity cap or the node budget.
+  There are no totals; counting a whole neighbourhood would defeat the
+  budget.
+* **`budget` is the effective, post-clamp bound.** A client may lower any
+  budget per request; a request above the server cap is clamped, never
+  honoured.
+* **Entity nodes** carry `entity_type`, `aliases`, `hops` (BFS distance from
+  the root, neighborhood only) and, with `include=merges`,
+  `merged_from_count`. **Memory nodes** carry `memory_type`, `status`,
+  `confidence`, `valid_from`/`valid_until`, `temporal_state`, and a `label`
+  truncated to 200 characters (the full text is `GET /memories/{id}`).
+* **`relates_to` edges are aggregated.** Several stored `RELATES_TO` edges
+  for the same `(source, predicate, target, status, temporal_state)` become
+  one slice edge. It carries `assertion_count` and up to 20 `memory_ids`;
+  the full list is the evidence endpoint's job. Storage is unchanged
+  (ADR 0001): each assertion remains its own edge. Edge ids are stable and
+  deterministic.
+* **No layout coordinates.** Layout is a UI concern.
+* **Rendering contract.** Every string (entity names, memory content,
+  message and document text) is plain, untrusted user data. A client must
+  render it as text, never as HTML.
+
+## Temporal scope
+
+Temporal meaning is computed on the server with the same half-open
+`[valid_from, valid_until)` semantics as `app/models/lifecycle.py`. A null
+`valid_from` means "since the beginning", and a null `valid_until` means "no
+known end". Status and window filters are applied **inside the traversal, on
+every hop**, never after a limit.
+
+| `temporal_scope` | Includes | `as_of` |
+|---|---|---|
+| `current` (**default**, D3) | status `active` or `conflicting`, and window contains now | must be omitted (422 otherwise) |
+| `as_of` | any status except `invalid`/`archived`/`merged`, window contains `as_of` | **required** |
+| `all` | any status except `invalid`/`archived`/`merged`, regardless of window | optional: moves the instant `temporal_state` is computed against (default now) |
+
+`temporal_state` on every edge and memory node is `current`, `historical`
+(the window closed at or before `as_of`) or `not_yet_valid` (the window
+starts after `as_of`). `as_of` must carry a timezone offset (`...Z`); a naive
+instant is rejected with 422.
+
+A superseded edge that was valid at `T` **is** included under
+`as_of=T`, because it was true then. It keeps `status: "superseded"` and is
+`temporal_state: "current"` relative to `T`. For an entity's one-hop
+facts this is exactly `GET /entities/{id}/history?as_of=T`'s `current`
+bucket (cross-checked by tests). Window boundaries are compared by instant,
+so a fact whose window ends at `T` is excluded at `T` and included one
+microsecond earlier.
+
+Historical facts are never traversed in `current` scope. A node reachable
+only through a superseded edge does not appear.
+
+## Identity: merged entities and duplicates
+
+* An `entity_id` that was merged away resolves through the existing
+  `MERGED_INTO` resolver: merge-chain safe, cycle-safe, user-scoped. The
+  slice is rooted at the canonical entity, and `resolved_from` /
+  `redirect_depth` report the redirect.
+* Merged-away entities never appear as nodes in any slice. Their
+  relationships were copied onto the canonical entity at merge time, and
+  those copies are what the slice shows.
+* `MERGED` (confirmed duplicate) memories are excluded, and so is any
+  `RELATES_TO` edge whose asserting memory is `merged`, `invalid` or
+  `archived`. A duplicate's own edge keeps status `active` (ADR 0010), so
+  without this rule it would inflate `assertion_count`.
+
+## Isolation
+
+Every node and every relationship in every query is filtered on the
+requesting user. Another user's ids behave exactly like ids that do not
+exist:
+
+* path ids, `source_entity_id` / `target_entity_id` and `memory_id` return
+  **404** (never 403);
+* ids in `exclude_ids` have **no effect**: they are never matched;
+* `overview` returns an empty slice.
+
+## `GET /graph/overview`
+
+The user's canonical entities, **most recently updated first**, with ties
+broken by name and then id (deterministic). Merged-away entities are
+excluded. The response also includes the in-scope edges among the returned
+entities.
+
+This is the plan's approved fallback ordering (`docs/PHASE8_PLAN.md` section
+9.1). The planned "rank by in-scope degree" was measured at about 3.8 s warm
+(5.5M db hits) at 10k synthetic entities, against about 62 ms for this
+ordering. A slice's *edges* are in-scope-filtered either way; only the choice
+of which entities to show changes. An entity with no in-scope relationship
+can therefore appear with no edges.
+
+| Param | Default | Bounds |
+|---|---|---|
+| `limit` | `GRAPH_EXPLORE_MAX_NODES` | clamped to it |
+| `max_edges` | `GRAPH_EXPLORE_MAX_EDGES` | clamped to it |
+| `temporal_scope`, `as_of` | `current` | see above |
+| `entity_type` | all | repeatable `EntityType` value |
+| `include` | none | repeatable: `memories`, `merges` |
+
+## `GET /graph/entities/{entity_id}/neighborhood`
+
+A breadth-first expansion, one bounded query per hop. There is no
+variable-length path pattern, so no value is ever interpolated into Cypher.
+The node budget counts the root. Nodes are ordered by `(hops, name, id)`,
+so a truncated slice is always the same set. If the budget is exactly full
+at a hop boundary, the server probes the next hop for one more in-scope node
+so that `truncated_nodes` stays exact.
+
+| Param | Default | Bounds |
+|---|---|---|
+| `hops` | `1` | `1..GRAPH_EXPLORE_MAX_HOPS` (422 above) |
+| `max_nodes` / `max_edges` | settings | clamped to settings |
+| `temporal_scope`, `as_of` | `current` | see above |
+| `predicate` | all | repeatable, each `^[a-z][a-z0-9_]{0,62}[a-z0-9]$`, at most 20 |
+| `entity_type` | all | repeatable `EntityType` value; a non-matching node is neither returned nor expanded through |
+| `exclude_ids` | none | repeatable id, at most `GRAPH_EXPLORE_MAX_NODES` |
+| `include` | none | `memories`, `merges` |
+
+**Incremental expansion.** Pass the ids already on screen as `exclude_ids`.
+Excluded nodes are neither returned nor re-expanded, but edges from new
+nodes back into them are returned so the client can connect the two.
+
+`include=memories` adds, for every entity node, up to
+`GRAPH_EXPLORE_MAX_MEMORIES_PER_ENTITY` in-scope memories that mention it
+(newest first), all within the node budget. It also adds `mentions` edges
+and the `supersedes` / `conflicts_with` / `duplicate_of` links between the
+memories in the slice. A relationship-less ("bare") memory is visible only
+this way.
+
+## `GET /graph/edges/evidence`
+
+"Why does the system believe `X -[predicate]-> Y`?" in one call. It returns
+every stored `RELATES_TO` edge for that directed triple, with its asserting
+memory and that memory's resolved provenance. It replaces the old N+1
+sequence: one `GET /memories/{id}` plus one `GET /memories/{id}/provenance`
+per memory.
+
+| Param | Default | Bounds |
+|---|---|---|
+| `source_entity_id`, `target_entity_id` | required | merged ids resolve; another user's id → 404 |
+| `predicate` | required | predicate pattern, ≤ 100 chars |
+| `temporal_scope`, `as_of` | **`current`** (D3) | pass `all` to include superseded assertions |
+| `limit` | `SEARCH_MAX_LIMIT` | clamped to it; `truncated` is exact |
+
+Each `assertions[]` item has the edge's `status`, window and
+`temporal_state`, plus `memory_id`, `evidence_status` and `memory`. The
+`memory` field holds content, status, window, link fields and `sources[]`;
+each source is resolved to a message (role plus content, ≤ 4,000 chars) or to
+a document plus chunk (filename, chunk content, page, section).
+`nodes`/`edges` repeat the memory and source nodes with `derived_from`
+edges, for drawing.
+
+Evidence that cannot be shown is labelled, never fabricated:
+
+| `evidence_status` | Meaning |
+|---|---|
+| `available` | the memory exists and at least one source resolved |
+| `no_asserting_memory` | the edge has no `memory_id` (e.g. legacy or seeded data) |
+| `memory_not_found` | `memory_id` points at nothing readable for this user |
+| `no_sources` | the memory has no `DERIVED_FROM` source |
+| `sources_unresolved` | sources exist but none resolved (e.g. the message or document was deleted); `resolved: false` per source, metadata only |
+
+`evidence_available` is true iff at least one assertion is `available`.
+
+Cost is constant in the number of memories and sources. Each request makes
+three Neo4j reads (two entity resolutions and one evidence query) and at
+most three SQL statements (messages, documents, chunks, batched). This is
+measured in `eval/graph_api_benchmark.py` and pinned by a test.
+
+## `GET /graph/memories/{memory_id}/timeline`
+
+The memory's `supersedes` / `superseded_by` / `duplicate_of` / `duplicates` /
+`conflicts_with` chain. It is produced by the same walk as the agent's
+`get_memory_history` tool (`app/services/memory_history.py`), which here
+additionally follows `conflicts_with`. It is bounded at 20 memories, and
+`truncated_nodes` is set if more remained.
+
+* Nodes are **oldest first**: `valid_from`, then `created_at`, then `id`.
+* `status` is reported exactly as stored. `superseded`, `merged`, `invalid`,
+  `conflicting` and `historical` are never collapsed or re-derived.
+  Superseding a `historical` memory re-files it as `superseded`, and the
+  timeline shows that.
+* `temporal_scope` is always `all`: a timeline is an explicit request for
+  history.
+* Edges: `supersedes` (newer → older), `duplicate_of` (duplicate →
+  canonical) and `conflicts_with` (one edge per pair, lower id first), between
+  chain members only. `budget.max_edges` is `null` because edges are bounded
+  by the bounded node set.
+
+## Errors
+
+422 for invalid parameters (`hops` out of range, `as_of` missing, forbidden
+or naive, a malformed id, predicate, entity type or `include` value, too many
+`exclude_ids` or predicates). 404 for an unknown or other-user id. Mutating
+methods return 405.
+
+---
+
 # 5. Running locally
 
 No Docker required.
@@ -934,8 +1171,18 @@ See `.env.example` for the full annotated list. Required regardless of phase:
 |---|---|
 | `RETRIEVAL_GRAPH_HOPS` | Default `2` — multi-hop graph retrieval's hop budget, bounded `[1,3]` by the setting itself (the approved hard maximum) |
 | `RETRIEVAL_GRAPH_DECAY_RATE` | Default `0.5` — exponential relevance decay, `decay_rate ** hops` |
-| `RETRIEVAL_GRAPH_MAX_NODES` | Default `200` — bounds a single neighbourhood traversal's result size |
+| `RETRIEVAL_GRAPH_MAX_NODES` | Default `200` — bounds the nodes one traversal returns **for hybrid retrieval's graph channel and the agent's `traverse_graph` only** (`neighbourhood_with_paths`), and the anchor entities the graph channel expands per query. It does **not** bound `GET /entities/{id}/graph` — before Phase 8 that endpoint had no result bound at all; it is now bounded by `GRAPH_MAX_NODES` / `GRAPH_MAX_EDGES` |
 | `INTERNAL_API_TOKEN` | Also now guards `POST /internal/review/reconcile` (same token as the extraction/embedding sweeps) |
+
+## Phase 8 additions
+
+| Variable | Notes |
+|---|---|
+| `GRAPH_MAX_NODES` / `GRAPH_MAX_EDGES` | Default `1000` / `5000` (hard max `10000` / `50000`) — result caps on `GET /entities/{id}/graph` (D1; values from the Stage 0 measurements, see `docs/PHASE8_PLAN.md` section 25) |
+| `GRAPH_EXPLORE_MAX_NODES` | Default `150`, hard max `1000` — node budget per `/graph/*` slice; also the maximum length of `exclude_ids` |
+| `GRAPH_EXPLORE_MAX_EDGES` | Default `400`, hard max `3000` — edge budget per slice |
+| `GRAPH_EXPLORE_MAX_HOPS` | Default `2`, hard max `3` — neighborhood depth |
+| `GRAPH_EXPLORE_MAX_MEMORIES_PER_ENTITY` | Default `5`, hard max `25` — memory nodes per entity with `include=memories` |
 
 `REDIS_URL` and `STORAGE_*` are present in `.env.example` for later phases and are
 **unused through Phase 4**.

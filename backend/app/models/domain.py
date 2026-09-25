@@ -167,6 +167,10 @@ class Neighborhood(BaseModel):
     hops: int
     nodes: list[GraphNode] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
+    #: Phase 8 (D1): True iff GRAPH_MAX_NODES or GRAPH_MAX_EDGES cut the
+    #: result (exact: one more than the cap is fetched). Additive; clients that
+    #: predate it can ignore it.
+    truncated: bool = False
 
 
 class GraphPathStep(BaseModel):

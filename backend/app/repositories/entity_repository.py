@@ -50,10 +50,15 @@ MATCH (e:Entity {user_id: $user_id, normalized_name: $normalized_name})
 RETURN e {.*} AS entity
 """
 
+#: Phase 8 (D2): a merged-away entity (outgoing MERGED_INTO) is hidden unless
+#: `$include_merged` -- its name lives on as an alias of the canonical entity,
+#: so searching for it still finds the canonical one, and its id still
+#: resolves through `RESOLVE_ENTITY`.
 SEARCH_ENTITIES = """
 MATCH (e:Entity {user_id: $user_id})
-WHERE toLower(e.name) CONTAINS toLower($query)
-   OR any(a IN coalesce(e.aliases, []) WHERE toLower(a) CONTAINS toLower($query))
+WHERE (toLower(e.name) CONTAINS toLower($query)
+       OR any(a IN coalesce(e.aliases, []) WHERE toLower(a) CONTAINS toLower($query)))
+  AND ($include_merged OR NOT (e)-[:MERGED_INTO]->())
 RETURN e {.*} AS entity
 ORDER BY e.name
 SKIP $offset LIMIT $limit
@@ -125,7 +130,8 @@ WHERE all(r IN rels WHERE r.user_id = $user_id AND NOT r.status IN $excluded_sta
   AND other.id <> $entity_id
 WITH other, min(length(path)) AS hops
 RETURN other {{.*}} AS entity, hops
-ORDER BY hops, other.name
+ORDER BY hops, other.name, other.id
+LIMIT $max_nodes
 """
 
 NEIGHBOURHOOD_EDGES = """
@@ -133,7 +139,10 @@ MATCH (a:Entity {user_id: $user_id})-[r:RELATES_TO {user_id: $user_id}]->
       (b:Entity {user_id: $user_id})
 WHERE a.id IN $ids AND b.id IN $ids
   AND NOT r.status IN $excluded_statuses
-RETURN DISTINCT r {.*, source_entity_id: a.id, target_entity_id: b.id} AS relationship
+WITH DISTINCT r, a, b
+RETURN r {.*, source_entity_id: a.id, target_entity_id: b.id} AS relationship
+ORDER BY r.id
+LIMIT $max_edges
 """
 
 #: PHASE3_PLAN.md's own intended refinement, built in Phase 4: the same node
@@ -330,11 +339,23 @@ class EntityRepository:
         return to_entity(rows[0]["entity"]) if rows else None
 
     async def search(
-        self, *, user_id: str, query: str, limit: int, offset: int
+        self,
+        *,
+        user_id: str,
+        query: str,
+        limit: int,
+        offset: int,
+        include_merged: bool = False,
     ) -> list[Entity]:
         rows = await self._client.read(
             SEARCH_ENTITIES,
-            {"user_id": user_id, "query": query, "limit": limit, "offset": offset},
+            {
+                "user_id": user_id,
+                "query": query,
+                "limit": limit,
+                "offset": offset,
+                "include_merged": include_merged,
+            },
         )
         return [to_entity(r["entity"]) for r in rows]
 
@@ -436,7 +457,11 @@ class EntityRepository:
         hops: int,
         max_hops: int,
         excluded_statuses: list[str],
+        max_nodes: int,
+        max_edges: int,
     ) -> Neighborhood:
+        """`max_nodes`/`max_edges` (Phase 8, D1) cap the result; one extra row
+        is fetched for each so `Neighborhood.truncated` is exact."""
         safe_hops = validate_hops(hops, max_hops)
         query = NEIGHBOURHOOD_NODES_TEMPLATE.format(hops=safe_hops)
         node_rows = await self._client.read(
@@ -445,22 +470,34 @@ class EntityRepository:
                 "user_id": user_id,
                 "entity_id": root.id,
                 "excluded_statuses": excluded_statuses,
+                "max_nodes": max_nodes + 1,
             },
         )
+        truncated = len(node_rows) > max_nodes
         nodes = [
             GraphNode(entity=to_entity(r["entity"]), hops=int(r["hops"]))
-            for r in node_rows
+            for r in node_rows[:max_nodes]
         ]
         ids = [root.id, *[n.entity.id for n in nodes]]
         edge_rows = await self._client.read(
             NEIGHBOURHOOD_EDGES,
-            {"user_id": user_id, "ids": ids, "excluded_statuses": excluded_statuses},
+            {
+                "user_id": user_id,
+                "ids": ids,
+                "excluded_statuses": excluded_statuses,
+                "max_edges": max_edges + 1,
+            },
         )
+        truncated = truncated or len(edge_rows) > max_edges
         relationships: list[Relationship] = [
-            to_relationship(r["relationship"]) for r in edge_rows
+            to_relationship(r["relationship"]) for r in edge_rows[:max_edges]
         ]
         return Neighborhood(
-            root=root, hops=safe_hops, nodes=nodes, relationships=relationships
+            root=root,
+            hops=safe_hops,
+            nodes=nodes,
+            relationships=relationships,
+            truncated=truncated,
         )
 
     async def neighbourhood_with_paths(

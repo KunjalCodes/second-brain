@@ -58,7 +58,7 @@ class User(Base):
 
     **This is not an authentication system.** It stores no passwords, no API keys,
     no credentials, no sessions and no sensitive profile data. Authentication is
-    Phase 8; until then the user id still arrives via the `X-User-Id` development
+    Phase 9; until then the user id still arrives via the `X-User-Id` development
     header (docs/adr/0005).
 
     Its purpose is referential integrity and a consistent isolation key between the
@@ -67,7 +67,7 @@ class User(Base):
         PostgreSQL users.id  <-->  Neo4j user_id namespace property
 
     `external_auth_id` is the empty seam where a real identity provider's subject
-    will attach in Phase 8.
+    will attach in Phase 9.
     """
 
     __tablename__ = "users"
@@ -550,7 +550,7 @@ class ReviewAuditLog(Base):
     resulting_state: Mapped[dict] = mapped_column(JSONB, nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
     #: = user_id today; a distinct reviewer identity from the acting user is
-    #: Phase 8 (authentication) territory -- kept as its own column now so that
+    #: Phase 9 (authentication) territory -- kept as its own column now so that
     #: change is additive later, not a rename.
     reviewer_id: Mapped[str] = mapped_column(String(USER_ID_LENGTH), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

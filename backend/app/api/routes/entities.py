@@ -31,12 +31,17 @@ async def search_entities(
     q: Annotated[str, Query(min_length=1, description="Substring of name or alias")],
     limit: Annotated[int, Query(ge=1)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,
+    include_merged: Annotated[
+        bool,
+        Query(description="Also return merged-away entities (hidden by default)"),
+    ] = False,
 ) -> EntityListResponse:
     items = await service.search_entities(
         user_id=user_id,
         query=q,
         limit=min(limit, settings.search_max_limit),
         offset=offset,
+        include_merged=include_merged,
     )
     return EntityListResponse(items=items, limit=limit, offset=offset)
 

@@ -240,10 +240,24 @@ class Settings(BaseSettings):
 
     # -- Graph behaviour ---------------------------------------------------
     graph_max_hops: int = Field(default=4, ge=1, le=10)
+    #: Phase 8 (D1, Stage 0-measured): caps on GET /entities/{id}/graph, which
+    #: had none -- at 10k synthetic entities one request returned ~89 MB. The
+    #: defaults are the largest result size Stage 0 measured as healthy locally
+    #: (~1k nodes / ~4k edges in <=1.3 s); `Neighborhood.truncated` reports a cut.
+    graph_max_nodes: int = Field(default=1000, ge=1, le=10_000)
+    graph_max_edges: int = Field(default=5000, ge=1, le=50_000)
     search_max_limit: int = Field(default=200, ge=1, le=1000)
 
+    # -- Memory graph exploration API (Phase 8, docs/PHASE8_PLAN.md section 8.3) --
+    # Server-side budgets for /graph/*. A client may lower them per request but
+    # never raise them past these values; each `le=` is the approved hard cap.
+    graph_explore_max_nodes: int = Field(default=150, ge=1, le=1000)
+    graph_explore_max_edges: int = Field(default=400, ge=1, le=3000)
+    graph_explore_max_hops: int = Field(default=2, ge=1, le=3)
+    graph_explore_max_memories_per_entity: int = Field(default=5, ge=1, le=25)
+
     # -- Phase 1 identity placeholder --------------------------------------
-    # Phase 1 has no authentication (Phase 8). The user id arrives in the
+    # Phase 1 has no authentication (Phase 9). The user id arrives in the
     # X-User-Id header and falls back to this value. This is NOT a security
     # boundary; it exists so that every record is namespaced from day one and
     # real auth can replace only `app.api.deps.get_current_user_id`.

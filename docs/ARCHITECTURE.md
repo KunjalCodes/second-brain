@@ -223,6 +223,25 @@ makes this free, no manual visited-set needed), and is bounded to
 entities to their pre-merge state (aliases excepted — a documented,
 accepted limitation).
 
+**Extended in Phase 8** (ADR 0018, `docs/PHASE8_PLAN.md`, API reference in
+`docs/API.md` section 4c): the graph is exposed to a future Memory Explorer
+only as a **bounded, read-only projection**. `GraphExplorationService`
+(`app/services/graph_exploration_service.py`) cuts `GraphSlice`s from the
+canonical graph through `app/repositories/graph_repository.py`. That
+repository traverses breadth-first, one bounded query per hop, rather than
+with a variable-length pattern. It applies the temporal/status scope inside
+the Cypher on every hop, compares validity windows by instant (UTC-normalised
+on both sides), and fetches budget + 1 rows so truncation flags are exact.
+Merge resolution reuses `RetrievalService.resolve_entity()`. Provenance
+reuses `ProvenanceService`, now batched through `resolve_sources()`. Memory
+history reuses the walk extracted from the agent's `get_memory_history` tool
+(`app/services/memory_history.py`). Storage is never changed to suit
+presentation: no new labels, relationship types, indexes or tables. The
+pre-existing `GET /entities/{id}/graph` is now result-capped
+(`GRAPH_MAX_NODES` / `GRAPH_MAX_EDGES`, `truncated`), a change made only
+after Stage 0 measured it returning ~89 MB from one request at 10k
+synthetic entities.
+
 ---
 
 # 8. Vector Engine
@@ -476,6 +495,13 @@ requested_user == authenticated_user
 ```
 
 unless a future shared-memory feature explicitly permits otherwise.
+
+**Phase 8** (ADR 0019): the static Cypher isolation audit
+(`backend/tests/unit/test_cypher_safety.py`) no longer depends on a
+hand-maintained module list. A meta-test walks `app/repositories/`, finds
+every module holding Cypher-shaped constants, and fails if any is not
+audited, so a new repository module cannot silently escape the
+`$user_id` rule.
 
 ---
 

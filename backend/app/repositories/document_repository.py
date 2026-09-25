@@ -105,6 +105,14 @@ class DocumentRepository(UserScopedRepository):
             return None
         return _document_to_domain(row)
 
+    async def get_many(self, *, document_ids: list[str]) -> dict[str, Document]:
+        """Batched `get` (Phase 8 evidence endpoint); unknown/foreign ids absent."""
+        if not document_ids:
+            return {}
+        stmt = self._select(DocumentRow).where(DocumentRow.id.in_(document_ids))
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return {row.id: _document_to_domain(row) for row in rows}
+
     async def list(self, *, limit: int, offset: int) -> list[Document]:
         stmt = (
             self._select(DocumentRow)
@@ -163,6 +171,14 @@ class DocumentChunkRepository(UserScopedRepository):
         if row is None or row.user_id != self._user_id:
             return None
         return _chunk_to_domain(row)
+
+    async def get_many(self, *, chunk_ids: list[str]) -> dict[str, DocumentChunk]:
+        """Batched `get` (Phase 8 evidence endpoint); unknown/foreign ids absent."""
+        if not chunk_ids:
+            return {}
+        stmt = self._select(ChunkRow).where(ChunkRow.id.in_(chunk_ids))
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return {row.id: _chunk_to_domain(row) for row in rows}
 
     async def list_for_document(self, *, document_id: str) -> list[DocumentChunk]:
         stmt = (

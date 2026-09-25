@@ -71,6 +71,7 @@ from app.services.hybrid_retrieval_service import (
     HybridSearchResult,
     _temporal_state,
 )
+from app.services.memory_history import walk_memory_history
 from app.services.memory_service import MemoryService
 from app.services.provenance_service import ProvenanceService
 from app.services.retrieval_service import RetrievalService
@@ -351,39 +352,20 @@ async def get_memory_history(
 ) -> ToolResult:
     """Walks `supersedes`/`superseded_by`/`duplicate_of`/`duplicates` outward
     from one memory to assemble its full chronological/identity chain --
-    Python-side assembly over existing single-memory reads
-    (`MemoryService.get`), no new Cypher.
+    the shared walk in `app.services.memory_history` (Phase 8 extraction,
+    also used by the graph timeline endpoint), no new Cypher.
     """
     try:
-        start = await deps.memory.get(user_id=user_id, memory_id=args.memory_id)
+        walk = await walk_memory_history(
+            deps.memory, user_id=user_id, memory_id=args.memory_id, max_chain=_MAX_HISTORY_CHAIN
+        )
     except NotFoundError:
         return ToolResult(
             status=ToolStatus.NOT_FOUND, message=f"No memory found with id {args.memory_id!r}."
         )
 
     now = deps.now_fn()
-    chain: dict[str, dict[str, Any]] = {start.memory.id: _compact_memory(start, now=now)}
-    to_visit = list(
-        {*start.supersedes, *start.superseded_by, *start.duplicate_of, *start.duplicates}
-    )
-    while to_visit and len(chain) < _MAX_HISTORY_CHAIN:
-        related_id = to_visit.pop()
-        if related_id in chain:
-            continue
-        try:
-            related = await deps.memory.get(user_id=user_id, memory_id=related_id)
-        except NotFoundError:
-            continue
-        chain[related_id] = _compact_memory(related, now=now)
-        to_visit.extend(
-            {
-                *related.supersedes,
-                *related.superseded_by,
-                *related.duplicate_of,
-                *related.duplicates,
-            }
-        )
-
+    chain = {detail.memory.id: _compact_memory(detail, now=now) for detail in walk.details}
     return ToolResult(
         status=ToolStatus.OK, data={"chain": list(chain.values())}, memory_ids=list(chain)
     )

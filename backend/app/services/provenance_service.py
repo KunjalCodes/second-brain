@@ -13,6 +13,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import DocumentChunkSummary, DocumentSummary, parse_chunk_id_from_location
+from app.models.domain import Source
 from app.models.enums import SourceType
 from app.repositories.document_repository import DocumentChunkRepository, DocumentRepository
 from app.repositories.message_repository import MessageRepository
@@ -31,26 +32,61 @@ class ProvenanceService:
         read.
         """
         detail = await self._memory_service.get(user_id=user_id, memory_id=memory_id)
-        messages = MessageRepository(self._session, user_id=user_id)
-        documents = DocumentRepository(self._session, user_id=user_id)
-        chunks = DocumentChunkRepository(self._session, user_id=user_id)
+        resolved = await self.resolve_sources(user_id=user_id, sources=detail.sources)
+        return ProvenanceView(memory=detail.memory, sources=resolved)
+
+    async def resolve_sources(
+        self, *, user_id: str, sources: list[Source]
+    ) -> list[SourceProvenance]:
+        """Resolve Sources into messages / documents / chunks, in input order.
+
+        Batched (Phase 8): at most one query per referent kind however many
+        sources are passed, so a caller resolving many memories' sources at
+        once (the graph evidence endpoint) does not issue one query per
+        source. Semantics are exactly the per-source ones: a referent that
+        cannot be found for this user resolves to None, never an error.
+        """
+        message_ids = sorted(
+            {s.reference for s in sources if s.source_type is SourceType.MESSAGE and s.reference}
+        )
+        document_ids = sorted(
+            {s.reference for s in sources if s.source_type is SourceType.DOCUMENT and s.reference}
+        )
+        chunk_ids = sorted(
+            {
+                chunk_id
+                for s in sources
+                if s.source_type is SourceType.DOCUMENT
+                and s.reference
+                and (chunk_id := parse_chunk_id_from_location(s.location)) is not None
+            }
+        )
+        messages = await MessageRepository(self._session, user_id=user_id).get_many(
+            message_ids=message_ids
+        )
+        documents = await DocumentRepository(self._session, user_id=user_id).get_many(
+            document_ids=document_ids
+        )
+        chunks = await DocumentChunkRepository(self._session, user_id=user_id).get_many(
+            chunk_ids=chunk_ids
+        )
 
         resolved: list[SourceProvenance] = []
-        for source in detail.sources:
+        for source in sources:
             message = None
             document = None
             document_chunk = None
             if source.source_type is SourceType.MESSAGE and source.reference:
-                message = await messages.get(message_id=source.reference)
+                message = messages.get(source.reference)
             elif source.source_type is SourceType.DOCUMENT and source.reference:
-                doc = await documents.get(document_id=source.reference)
+                doc = documents.get(source.reference)
                 if doc is not None:
                     document = DocumentSummary(
                         id=doc.id, filename=doc.filename, uploaded_at=doc.uploaded_at
                     )
                 chunk_id = parse_chunk_id_from_location(source.location)
                 if chunk_id is not None:
-                    chunk = await chunks.get(chunk_id=chunk_id)
+                    chunk = chunks.get(chunk_id)
                     if chunk is not None:
                         document_chunk = DocumentChunkSummary(
                             id=chunk.id,
@@ -68,5 +104,4 @@ class ProvenanceService:
                     source=source, message=message, document=document, document_chunk=document_chunk
                 )
             )
-
-        return ProvenanceView(memory=detail.memory, sources=resolved)
+        return resolved

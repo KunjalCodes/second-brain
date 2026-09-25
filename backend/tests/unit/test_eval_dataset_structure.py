@@ -121,3 +121,34 @@ class TestDocumentDatasetCoversAllElevenCategories:
         tasks = _load("document_v1.jsonl")
         task_ids = [t["task_id"] for t in tasks]
         assert len(task_ids) == len(set(task_ids))
+
+
+class TestGraphApiDataset:
+    """Phase 8 conformance dataset (PHASE8_PLAN.md section 15)."""
+
+    REQUIRED_CATEGORIES = {
+        "temporal_current", "temporal_as_of", "temporal_all", "merged_entity", "conflicting",
+        "duplicate", "multi_assertion", "bare_statement", "document_provenance",
+        "hub_truncation", "incremental_expansion", "cross_user",
+    }
+
+    def test_every_line_is_one_object_with_a_unique_id(self) -> None:
+        path = DATASETS_DIR / "graph_api_v1.jsonl"
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
+        tasks = [json.loads(line) for line in lines]
+        assert all(isinstance(t, dict) for t in tasks)
+        ids = [t["task_id"] for t in tasks]
+        assert len(ids) == len(set(ids))
+
+    def test_covers_every_planned_category(self) -> None:
+        categories = {t["category"] for t in _load("graph_api_v1.jsonl")}
+        assert categories >= self.REQUIRED_CATEGORIES
+
+    def test_every_task_names_a_known_op_and_has_expectations(self) -> None:
+        for t in _load("graph_api_v1.jsonl"):
+            assert t["op"] in {"neighborhood", "overview", "evidence", "timeline", "search"}
+            assert t["expect"], t["task_id"]
+
+    def test_every_endpoint_is_probed_cross_user(self) -> None:
+        ops = {t["op"] for t in _load("graph_api_v1.jsonl") if t.get("as_other_user")}
+        assert {"neighborhood", "overview", "evidence", "timeline"} <= ops

@@ -11,7 +11,7 @@ extraction sweep -- must walk every user's data by design, not by accident.
 
 **This table is not an authentication system.** It stores no passwords, no API
 keys, no credentials, no sessions and no sensitive profile data -- see
-`app/db/models.py::User` and docs/adr/0005 (authentication remains Phase 8).
+`app/db/models.py::User` and docs/adr/0005 (authentication is Phase 9).
 """
 
 from __future__ import annotations

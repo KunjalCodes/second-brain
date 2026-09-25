@@ -500,7 +500,7 @@ ai-second-brain/
 │   ├── pyproject.toml
 │   └── Procfile
 │
-├── frontend/                    Next.js on Vercel (Phase 9 per the roadmap — not built yet)
+├── frontend/                    Next.js on Vercel (Phase 10 per the roadmap — not built yet)
 │
 ├── docs/
 │   ├── PRODUCT.md
@@ -557,11 +557,15 @@ Evaluation framework.
 
 ## Phase 8
 
-Authentication + productionization.
+Memory graph exploration API (bounded, read-only backend contract for the Memory Explorer).
 
 ## Phase 9
 
-Deployment + UI polish.
+Authentication + productionization.
+
+## Phase 10
+
+Memory Explorer UI + deployment.
 
 ---
 
@@ -593,7 +597,7 @@ The project explores:
 
 # 📌 Status
 
-**Phase 7 complete — unified, persistent, resumable evaluation framework layered on top of the Phase 6 document-ingestion system.**
+**Phase 8 complete — bounded, read-only memory graph exploration API (`/graph/*`) for the future Memory Explorer, on top of the Phase 7 evaluation framework.**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -604,10 +608,11 @@ The project explores:
 | 5 | Persistent-memory agent: custom tool-calling loop, 7 memory tools (6 read + 1 gated write), citation/temporal/provenance enforcement, evaluation harness, real-LLM behavioral validation | ✅ Implemented and validated |
 | 6 | Document ingestion: TXT/Markdown/text-layer PDF, deterministic chunking, provenance, extraction-pipeline reuse (no second decision engine), zero-cost local storage | ✅ Implemented |
 | 7 | Evaluation framework: persistent/resumable evaluation runs (PostgreSQL), generalized `retrieval_necessity` category, strengthened evaluation-only baseline B, real-LLM checkpoint/resume | ✅ Implemented — see `docs/PHASE7_PLAN.md` for measured results and known limitations |
-| 8 | Authentication + productionization | Not started |
-| 9 | Deployment + UI polish | Not started |
+| 8 | Memory graph exploration API: `/graph/overview`, `/graph/entities/{id}/neighborhood`, `/graph/edges/evidence`, `/graph/memories/{id}/timeline` — one `GraphSlice` shape, server-side budgets with exact truncation flags, current-by-default temporal scope, merge-aware, user-isolated; measured caps on the existing `/entities/{id}/graph` | ✅ Implemented — see `docs/PHASE8_PLAN.md` section 25 for measured results and known limitations |
+| 9 | Authentication + productionization (moved here from Phase 8 by decision D0) | Not started |
+| 10 | Memory Explorer UI + deployment | Not started |
 
-Current test count and per-phase measured evaluation results are reported in `docs/PHASE7_PLAN.md`'s implementation-status section rather than duplicated here, since they change with every phase.
+Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE8_PLAN.md` section 25) rather than duplicated here, since they change with every phase.
 
 Phase 1 deliberately contains **no LLM, no embeddings, no agent, no document
 ingestion and no authentication**, so the graph-memory core could be verified on

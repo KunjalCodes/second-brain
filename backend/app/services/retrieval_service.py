@@ -43,10 +43,15 @@ class RetrievalService:
         *,
         max_hops: int,
         now_fn: Callable[[], datetime] = _utcnow,
+        max_nodes: int = 1000,
+        max_edges: int = 5000,
     ) -> None:
         self._repo = repository
         self._max_hops = max_hops
         self._now = now_fn
+        #: Caps for `get_neighbourhood` only (GRAPH_MAX_NODES/EDGES, Phase 8 D1).
+        self._max_nodes = max_nodes
+        self._max_edges = max_edges
 
     async def get_entity(self, *, user_id: str, entity_id: str) -> EntityDetail:
         """Resolves `entity_id` through any `MERGED_INTO` redirect first
@@ -89,10 +94,21 @@ class RetrievalService:
         return await self._repo.resolve(user_id=user_id, entity_id=entity_id)
 
     async def search_entities(
-        self, *, user_id: str, query: str, limit: int, offset: int
+        self,
+        *,
+        user_id: str,
+        query: str,
+        limit: int,
+        offset: int,
+        include_merged: bool = False,
     ) -> list[Entity]:
+        """Merged-away entities are hidden by default (Phase 8, D2)."""
         return await self._repo.search(
-            user_id=user_id, query=query, limit=limit, offset=offset
+            user_id=user_id,
+            query=query,
+            limit=limit,
+            offset=offset,
+            include_merged=include_merged,
         )
 
     async def list_all_entities(self, *, user_id: str, limit: int) -> list[Entity]:
@@ -179,6 +195,8 @@ class RetrievalService:
             hops=hops,
             max_hops=self._max_hops,
             excluded_statuses=DEFAULT_EXCLUDED,
+            max_nodes=self._max_nodes,
+            max_edges=self._max_edges,
         )
 
     async def get_neighbourhood_with_paths(

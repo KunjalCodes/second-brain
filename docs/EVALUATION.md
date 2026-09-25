@@ -30,6 +30,15 @@
 >   runs checkpointed/resumable across rate-limited invocations (ADR 0017,
 >   `eval/persistence.py`, `eval/report.py`). See `docs/PHASE7_PLAN.md`'s
 >   implementation-status section for what was actually measured.
+> * **Phase 8** added the first *deterministic* consumer of that persistence
+>   layer: `backend/eval/graph_api_runner.py` (`harness=graph_api`,
+>   `eval/datasets/graph_api_v1.jsonl`, 39 tasks, 13 categories). It
+>   exact-matches the node and edge sets of the memory graph exploration API
+>   (precision and recall must both be 1.0), with a byte-identical re-run
+>   check and a hard budget check. It is complemented by two latency
+>   benchmarks: `eval/graph_endpoint_benchmark.py` (the pre-existing
+>   `/entities/{id}/graph`) and `eval/graph_api_benchmark.py` (`/graph/*`).
+>   See `docs/PHASE8_PLAN.md` section 25.
 >
 > What remains true from the original framework: LLM-as-judge answer scoring,
 > the full 50→500+ question dataset growth plan, and human evaluation are
