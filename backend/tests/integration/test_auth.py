@@ -1108,3 +1108,18 @@ async def test_password_hashing_does_not_block_the_event_loop(
         await asyncio.gather(login(), health())
     served_after = health_done[0] - hash_started[0]
     assert served_after < hash_seconds[0] / 2, (served_after, hash_seconds[0])
+
+
+async def test_session_responses_are_explicitly_uncacheable(h: Harness) -> None:
+    """Phase 10 (G2): the login response (it can carry a token), authenticated
+    reads and the 401 all say `Cache-Control: no-store`."""
+    _, email = await h.account()
+    async with h.client() as c:
+        login = await c.post(
+            "/auth/login", json={"email": email, "password": PASSWORD, "token_in_body": True}
+        )
+        me = await c.get("/auth/me", headers={"Authorization": f"Bearer {login.json()['token']}"})
+    async with h.client() as anonymous:
+        denied = await anonymous.get("/memories/search")
+    assert [r.headers["cache-control"] for r in (login, me, denied)] == ["no-store"] * 3
+    assert denied.status_code == 401

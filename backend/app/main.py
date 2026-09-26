@@ -52,6 +52,15 @@ logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
+#: Phase 10 (G2): every API response that is not in the public set below is
+#: explicitly uncacheable -- user memory data must never land in a browser,
+#: proxy or CDN cache. One central rule, so a new route cannot forget it.
+NO_STORE = "no-store"
+#: Paths (without the API prefix) that carry no user data and may be cached.
+PUBLIC_CACHEABLE_PATHS = frozenset(
+    {"/health", "/health/ready", "/docs", "/docs/oauth2-redirect", "/openapi.json", "/redoc"}
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -125,6 +134,13 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    # G2: the docs are served at the root; health also under the API prefix.
+    prefix_for_cache = settings.api_prefix.rstrip("/")
+    public_cacheable_paths = frozenset(
+        {"/docs", "/docs/oauth2-redirect", "/openapi.json", "/redoc"}
+        | {prefix_for_cache + p for p in PUBLIC_CACHEABLE_PATHS}
+    )
+
     # CORS for a Vercel-hosted frontend. Explicit origins come from FRONTEND_URL and
     # CORS_ORIGINS; the regex additionally admits Vercel preview deployments, whose
     # hostnames are generated per commit and cannot be enumerated in advance.
@@ -148,11 +164,14 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
-        """Attach a request id to every response (ARCHITECTURE.md section 22)."""
+        """Attach a request id to every response (ARCHITECTURE.md section 22)
+        and mark every non-public response uncacheable (Phase 10, G2)."""
         request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid.uuid4())
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers[REQUEST_ID_HEADER] = request_id
+        if request.url.path not in public_cacheable_paths:
+            response.headers["Cache-Control"] = NO_STORE
         return response
 
     @app.exception_handler(AppError)
@@ -195,7 +214,9 @@ def create_app() -> FastAPI:
         """
         request_id = getattr(request.state, "request_id", None)
         logger.exception("Unhandled error (request_id=%s)", request_id)
+        # This handler runs outside the HTTP middleware, so set G2 here too.
         return JSONResponse(
+            headers={"Cache-Control": NO_STORE},
             status_code=500,
             content={
                 "error": {

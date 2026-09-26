@@ -92,27 +92,40 @@ Observability
 
 ---
 
-# 4. Frontend
+# 4. Frontend (Phase 10 — implemented)
 
-Technology:
-
-* Next.js
-* TypeScript
-* Tailwind
-* shadcn/ui
-
-Main routes:
+Next.js 16 (App Router), TypeScript, Tailwind CSS 4, TanStack Query and
+Cytoscape.js. There is no component library; dialogs are native `<dialog>`.
+See `frontend/README.md` and ADRs 0025–0030.
 
 ```text
-/
- /chat
- /graph
- /memories
- /entities/:id
- /documents
- /settings
- /login
+Browser ──(same origin, HttpOnly sb_session cookie)──► Next.js server
+                                                        │ rewrite /api/* → BACKEND_ORIGIN
+                                                        ▼
+                                                     FastAPI (authoritative)
 ```
+
+Routes:
+
+```text
+/login  /register (behind a build flag)
+/                  overview
+/memories          explorer (filters in URL, free text never in URL)
+/memories/:id      detail: valid vs recorded time, lifecycle, provenance
+/memories/:id/timeline
+/entities  /entities/:id    state now / as of, merge redirects
+/graph             Phase 8 slices, truncation always visible, list view
+/search            POST /search, relevance is relative
+/documents  /documents/:id  upload, pipeline status, chunks (provenance target)
+/conversations/:id transcript (provenance target)
+/review  /review/memories/:id  /review/entities/:id
+/ask               optional agent turn, citations from cited_memory_ids only
+/settings          session, password change, sign out everywhere
+```
+
+The frontend is a presentation layer. Temporal state, merges, budgets,
+provenance and citations are always the server's answer, never recomputed
+in the browser (ADR 0028). All content is rendered as inert text (ADR 0029).
 
 ---
 

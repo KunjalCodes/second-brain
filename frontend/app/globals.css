@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/* Design tokens (docs/PHASE10_PLAN.md §17): neutral, data-dense, one accent.
+   Contrast targets WCAG 2.1 AA in both themes. */
+@theme {
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-surface-2: #f0f2f5;
+  --color-border: #d9dde3;
+  --color-fg: #14181f;
+  --color-fg-muted: #4b5563;
+  --color-accent: #2b59c3;
+  --color-accent-fg: #ffffff;
+  --color-current: #0f7a4a;
+  --color-warn: #9a5b00;
+  --color-danger: #b42318;
+  --color-info: #1f5fa8;
+  --color-muted: #5b6472;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0e1116;
+    --color-surface: #151a21;
+    --color-surface-2: #1c222b;
+    --color-border: #2c3440;
+    --color-fg: #e6e9ee;
+    --color-fg-muted: #a3acb9;
+    --color-accent: #7aa2ff;
+    --color-accent-fg: #0e1116;
+    --color-current: #4ccf8e;
+    --color-warn: #f0b04a;
+    --color-danger: #ff7b70;
+    --color-info: #7ab8ff;
+    --color-muted: #9aa3af;
+  }
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* Visible focus for keyboard users everywhere. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Backend text is shown verbatim as data: preserve whitespace, never HTML. */
+.content-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--color-surface-2) 25%, var(--color-border) 50%, var(--color-surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+
+.chunk-list > li {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}

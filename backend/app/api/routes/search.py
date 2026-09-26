@@ -19,8 +19,26 @@ from app.schemas.search import (
     SearchResponse,
     SearchResultItem,
 )
+from app.services.hybrid_retrieval_service import RetrievalExplanation
 
 router = APIRouter(prefix="/search", tags=["search"])
+
+
+def _explanation_view(e: RetrievalExplanation) -> RetrievalExplanationView:
+    """Only the public fields. `graph_distance`/`graph_path` are internal to the
+    agent's tool output; spreading every dataclass field into this
+    `extra="forbid"` model made any non-empty search a 500."""
+    return RetrievalExplanationView(
+        memory_id=e.memory_id,
+        retrieved_via=e.retrieved_via,
+        vector_similarity=e.vector_similarity,
+        graph_relevance=e.graph_relevance,
+        keyword_match=e.keyword_match,
+        temporal_fit=e.temporal_fit,
+        confidence=e.confidence,
+        final_score=e.final_score,
+        temporal_state=e.temporal_state,
+    )
 
 
 @router.post(
@@ -45,7 +63,7 @@ async def search(
         items=[
             SearchResultItem(
                 memory=r.memory,
-                explanation=RetrievalExplanationView(**vars(r.explanation)),
+                explanation=_explanation_view(r.explanation),
             )
             for r in results
         ]

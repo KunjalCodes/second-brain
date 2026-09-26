@@ -15,10 +15,11 @@ class SearchRequest(BaseModel):
 
 
 class RetrievalExplanationView(BaseModel):
-    """Mirrors `app.services.hybrid_retrieval_service.RetrievalExplanation`
-    exactly -- a `None` field means that channel never found this result, not
-    that it scored zero (PHASE3_PLAN.md section 11: report computation, not a
-    fabricated narrative).
+    """Mirrors the public fields of `app.services.hybrid_retrieval_service.
+    RetrievalExplanation` (its `graph_distance`/`graph_path` are agent-internal
+    and not part of this response) -- a `None` field means that channel never
+    found this result, not that it scored zero (PHASE3_PLAN.md section 11:
+    report computation, not a fabricated narrative).
     """
 
     model_config = ConfigDict(extra="forbid")

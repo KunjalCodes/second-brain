@@ -444,6 +444,42 @@ ownership id without touching its data; it refuses ids with no existing data
 and ids that already have an account (so it cannot reassign ownership).
 Disabling revokes every session immediately.
 
+## Caching (Phase 10)
+
+Every response carries `Cache-Control: no-store` **except** the public,
+data-free paths:
+
+* `/health`, `/health/ready`;
+* `/docs`, `/docs/oauth2-redirect`, `/openapi.json`, `/redoc`
+
+(also under `API_PREFIX` when one is set). The rule is applied centrally, in
+the request middleware plus the unhandled-500 handler. It therefore covers
+success, application errors, 404/422, 401/403/429 and server errors alike,
+so no browser, proxy or CDN may store user memory data. Tests:
+
+* `tests/unit/test_cache_control.py`;
+* `test_session_responses_are_explicitly_uncacheable` in
+  `tests/integration/test_auth.py`.
+
+The Next.js proxy passes the header through; the E2E suite asserts it.
+
+## Browser clients behind the Next.js proxy (Phase 10)
+
+The Memory Explorer calls this API through a same-origin rewrite (ADR 0025).
+Measured behaviour of that proxy:
+
+* it forwards `Origin` and `Cookie` unchanged;
+* it rewrites `Host` and adds `x-forwarded-host`;
+* it passes a client-supplied `X-Forwarded-For` through **verbatim**.
+
+Consequences:
+
+* Set `FRONTEND_URL` to the UI's public origin. The CSRF check relies on it,
+  because the same-origin comparison never matches through the proxy.
+* Do **not** add the proxy to `TRUSTED_PROXY_IPS` (ADR 0026). Per-IP login
+  limiting then sees the proxy's address, so it acts as a shared bucket;
+  per-email and per-user limits are unaffected.
+
 ---
 
 # 4. Endpoints
@@ -709,7 +745,13 @@ unset (the endpoint fails closed, not open).
 ```
 
 A `null` field in `explanation` means that channel never found this result at
-all — never a fabricated zero (ADR 0009). The query's temporal intent (`now`/
+all — never a fabricated zero (ADR 0009).
+
+The explanation contains exactly the fields shown above. The agent-internal
+graph hop count and path are **not** part of this response. Phase 10 fixed a
+500 here: those fields were being spread into the `extra="forbid"` view, so
+every non-empty search failed. The fix is pinned by
+`tests/unit/test_search_route.py`. The query's temporal intent (`now`/
 `current`, `before`/`previously`/`used to`, an explicit `in <Month>`, or none of
 those) is detected deterministically (`app/semantic/query_understanding.py`, no
 LLM) and applied as a hard filter against Neo4j's authoritative status/validity —
@@ -1349,6 +1391,17 @@ See `.env.example` for the full annotated list. Required regardless of phase:
 
 `AUTH_SECRET` was removed from `.env.example`: server-side opaque sessions need
 no signing secret.
+
+## Phase 10 additions
+
+No new backend variables. The frontend has two, in `frontend/.env.example`:
+
+| Variable | Notes |
+|---|---|
+| `BACKEND_ORIGIN` | Server-only proxy target, fixed at build time |
+| `NEXT_PUBLIC_REGISTRATION_ENABLED` | Shows the sign-up page; the backend's `AUTH_REGISTRATION_ENABLED` stays authoritative |
+
+For the UI, set the backend's `FRONTEND_URL` to the UI origin.
 
 `REDIS_URL` and `STORAGE_*` are present in `.env.example` for later phases and are
 **unused through Phase 4**.

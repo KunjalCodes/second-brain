@@ -500,15 +500,15 @@ ai-second-brain/
 │   ├── pyproject.toml
 │   └── Procfile
 │
-├── frontend/                    Next.js on Vercel (Phase 10 per the roadmap — not built yet)
+├── frontend/                    Memory Explorer UI — Next.js (Phase 10; see frontend/README.md)
 │
 ├── docs/
 │   ├── PRODUCT.md
 │   ├── ARCHITECTURE.md
 │   ├── EVALUATION.md
 │   ├── API.md                   data model, graph schema, extraction pipeline, endpoints
-│   ├── PHASE2_PLAN.md .. PHASE7_PLAN.md   per-phase design + implementation status
-│   └── adr/                     architecture decision records (0001-0017)
+│   ├── PHASE2_PLAN.md .. PHASE10_PLAN.md  per-phase design + implementation status
+│   └── adr/                     architecture decision records (0001-0030)
 │
 ├── scripts/
 │   ├── init_graph.py            apply Neo4j constraints and indexes
@@ -565,7 +565,8 @@ Authentication + productionization.
 
 ## Phase 10
 
-Memory Explorer UI + deployment.
+Memory Explorer UI (implemented, verified locally). Free-tier demo deployment
+documented (ADR 0030), not performed.
 
 ---
 
@@ -597,7 +598,7 @@ The project explores:
 
 # 📌 Status
 
-**Phase 9 complete — authentication and session security (server-side PostgreSQL sessions, CSRF/CORS boundary, rate limiting, production-safety guards) on top of the Phase 8 memory graph exploration API.**
+**Phase 10 implemented locally: the Memory Explorer UI (Next.js), a presentation layer over the Phase 8 graph API and Phase 9 session auth. It is verified against a local stack and not deployed.**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -610,9 +611,9 @@ The project explores:
 | 7 | Evaluation framework: persistent/resumable evaluation runs (PostgreSQL), generalized `retrieval_necessity` category, strengthened evaluation-only baseline B, real-LLM checkpoint/resume | ✅ Implemented — see `docs/PHASE7_PLAN.md` for measured results and known limitations |
 | 8 | Memory graph exploration API: `/graph/overview`, `/graph/entities/{id}/neighborhood`, `/graph/edges/evidence`, `/graph/memories/{id}/timeline` — one `GraphSlice` shape, server-side budgets with exact truncation flags, current-by-default temporal scope, merge-aware, user-isolated; measured caps on the existing `/entities/{id}/graph` | ✅ Implemented — see `docs/PHASE8_PLAN.md` section 25 for measured results and known limitations |
 | 9 | Authentication & productization foundation: email/password accounts, opaque server-side sessions (HttpOnly cookie or Bearer), logout/logout-all/password change, CSRF Origin check and narrowed CORS, PostgreSQL rate limiting, production startup guards, operator CLI for legacy ids | ✅ Implemented — see `docs/PHASE9_PLAN.md` section 24 for measured results and known limitations |
-| 10 | Memory Explorer UI + deployment | Not started |
+| 10 | Memory Explorer UI: session-cookie auth through a same-origin proxy; memories, entities, time lens (valid vs recorded time), provenance, Cytoscape graph with visible truncation, ranked search, documents, review decisions, optional Ask page; authenticated responses made `no-store` (G2); inert rendering of all content | ✅ Implemented and verified locally (unit, component, E2E, a11y). The demo deployment (optional M10) is documented only, not deployed. See `docs/PHASE10_PLAN.md` section 29 |
 
-Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE9_PLAN.md` section 24) rather than duplicated here, since they change with every phase.
+Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE10_PLAN.md` section 29) rather than duplicated here, since they change with every phase.
 
 Phase 1 deliberately contains **no LLM, no embeddings, no agent, no document
 ingestion and no authentication**, so the graph-memory core could be verified on
