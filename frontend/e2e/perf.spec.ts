@@ -17,23 +17,46 @@ function stats(xs: number[]) {
 }
 
 async function jsBytes(page: Page, path: string, ready: () => Promise<void>) {
-  const sizes: { transferred: number; decoded: number }[] = [];
+  // Phase 11 (M10): split at the `load` event. JS requested before it is the
+  // critical path; JS after it is Next.js prefetching the routes linked from
+  // the navigation (idle-time, for faster later navigation). Phase 10 counted
+  // both as "initial JS", which overstated the critical path by ~34 KB.
+  let loaded = false;
+  const onLoad = () => {
+    loaded = true;
+  };
+  const sizes: { transferred: number; cached: boolean; decoded: number; critical: boolean }[] = [];
+  const phase = new Map<string, boolean>();
+  const onRequest = (r: import("@playwright/test").Request) => {
+    if (r.url().includes("/_next/static/") && r.url().endsWith(".js")) phase.set(r.url(), !loaded);
+  };
   const onResponse = async (r: import("@playwright/test").Response) => {
     if (r.url().includes("/_next/static/") && r.url().endsWith(".js")) {
       // Encoded (on-the-wire, gzip) body size vs the decoded JavaScript.
+      // A browser-cache hit reports a non-positive size: nothing crossed the
+      // wire, so it counts as 0 transferred (and as a cache hit).
       const { responseBodySize } = await r.request().sizes();
-      sizes.push({ transferred: responseBodySize, decoded: (await r.body()).length });
+      sizes.push({ transferred: Math.max(0, responseBodySize), cached: responseBodySize <= 0, decoded: (await r.body()).length, critical: phase.get(r.url()) ?? true });
     }
   };
+  page.on("load", onLoad);
+  page.on("request", onRequest);
   page.on("response", onResponse);
   await page.goto(path);
   await ready();
   await page.waitForLoadState("networkidle");
+  page.off("load", onLoad);
+  page.off("request", onRequest);
   page.off("response", onResponse);
+  const sum = (pick: (x: (typeof sizes)[number]) => number, filter: (x: (typeof sizes)[number]) => boolean) =>
+    sizes.filter(filter).reduce((a, b) => a + pick(b), 0);
   return {
     requests: sizes.length,
-    transferred_bytes: sizes.reduce((a, b) => a + b.transferred, 0),
-    decoded_bytes: sizes.reduce((a, b) => a + b.decoded, 0),
+    cache_hits: sizes.filter((x) => x.cached).length,
+    critical_transferred_bytes: sum((x) => x.transferred, (x) => x.critical),
+    prefetch_transferred_bytes: sum((x) => x.transferred, (x) => !x.critical),
+    transferred_bytes: sum((x) => x.transferred, () => true),
+    decoded_bytes: sum((x) => x.decoded, () => true),
   };
 }
 
@@ -140,4 +163,61 @@ test.afterAll(() => {
   mkdirSync("test-results", { recursive: true });
   writeFileSync("test-results/perf.json", JSON.stringify(results, null, 2));
   console.log("PERF", JSON.stringify(results, null, 2));
+});
+
+/**
+ * Phase 11 (M10): graph end-to-end attribution at ~50 / ~150 / ~300 nodes.
+ * backend = the API's own Server-Timing; network = request time minus that;
+ * layout = cose + element sync (canvas data-layout-ms); paint = two animation
+ * frames after layout (data-paint-ms). Run with E2E_PERF_GRAPH=1.
+ */
+test("graph attribution: backend vs network vs layout vs paint", async ({ page }) => {
+  const s = seed() as ReturnType<typeof seed> & { entities: Record<string, string | null> };
+  test.skip(!s.entities.hub_a, "run with E2E_PERF_GRAPH=1");
+  await login(page);
+
+  async function timedSlice(action: () => Promise<unknown>) {
+    const response = page.waitForResponse((r) => /\/api\/graph\/entities\/[^/]+\/neighborhood/.test(r.url()));
+    await action();
+    const r = await response;
+    const body = await r.json(); // timing().responseEnd is only final once the body is read
+    const t = r.request().timing();
+    const total = t.responseEnd - t.requestStart;
+    const server = Number(/app;dur=([\d.]+)/.exec(r.headers()["server-timing"] ?? "")?.[1] ?? NaN);
+    return { total_ms: Math.round(total), backend_ms: Math.round(server), network_ms: Math.round(total - server), nodes: body.nodes.length, edges: body.edges.length, truncated: body.truncated_nodes };
+  }
+
+  async function canvasTimings() {
+    const canvas = page.locator("[role=img][data-paint-ms]");
+    await expect(canvas).toBeVisible({ timeout: 30_000 });
+    return {
+      elements: Number(await canvas.getAttribute("data-elements")),
+      layout_ms: Number(await canvas.getAttribute("data-layout-ms")),
+      paint_ms: Number(await canvas.getAttribute("data-paint-ms")),
+    };
+  }
+
+  const cases: Record<string, unknown> = {};
+  for (const [label, id] of [["~50 nodes", s.entities.small_hub], ["~150 nodes", s.entities.hub_a]] as const) {
+    const runs = [];
+    for (let i = 0; i < 3; i++) {
+      const slice = await timedSlice(() => page.goto(`/graph?focus=${id}`));
+      runs.push({ ...slice, ...(await canvasTimings()) });
+    }
+    cases[label] = runs;
+  }
+
+  // ~300 nodes / ~600 elements: expand Hub B from the list view, then show the canvas.
+  const runs = [];
+  for (let i = 0; i < 3; i++) {
+    await page.goto(`/graph?focus=${s.entities.hub_a}`);
+    await canvasTimings();
+    await page.getByRole("button", { name: "List view" }).click();
+    await page.getByRole("button", { name: "Perf Hub B", exact: true }).click();
+    const slice = await timedSlice(() => page.getByRole("button", { name: "Expand neighbours" }).click());
+    await page.getByRole("button", { name: "Canvas view" }).click();
+    runs.push({ expansion: slice, ...(await canvasTimings()) });
+  }
+  cases["~300 nodes (after expansion; full canvas render)"] = runs;
+  results.graph_attribution = cases;
 });

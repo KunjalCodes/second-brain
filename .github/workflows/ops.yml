@@ -1,0 +1,76 @@
+# Staging operations (Phase 11, D12): nightly ENCRYPTED backup artifacts and a
+# readiness keep-alive. Requires secrets for the STAGING stores; with them
+# absent every job exits with a notice.
+#
+# Retention: artifacts are kept 7 days. Download them periodically to a
+# location you control (D12) -- GitHub artifacts are a convenience copy, not
+# an off-site backup. A backup only counts once a restore drill has passed
+# (scripts/backup.py verify; docs/DEPLOYMENT.md).
+#
+# Note: GitHub disables scheduled workflows in public repositories after 60
+# days without activity; re-enable them in the Actions tab.
+name: Ops (backup + keep-alive)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"   # daily backup, 03:17 UTC
+    - cron: "*/30 * * * *" # keep-alive every 30 minutes
+
+jobs:
+  keep-alive:
+    if: github.event.schedule == '*/30 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Readiness (wakes Render; exercises Neon + Aura)
+        env:
+          STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+        run: |
+          if [ -z "$STAGING_API_URL" ]; then echo "::notice::STAGING_API_URL not set"; exit 0; fi
+          code=$(curl -s -o /tmp/ready.json -w "%{http_code}" --max-time 120 "$STAGING_API_URL/health/ready")
+          cat /tmp/ready.json; echo
+          test "$code" = "200"
+
+  backup:
+    if: github.event.schedule == '17 3 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NEO4J_URI: ${{ secrets.STAGING_NEO4J_URI }}
+      NEO4J_USERNAME: ${{ secrets.STAGING_NEO4J_USERNAME }}
+      NEO4J_PASSWORD: ${{ secrets.STAGING_NEO4J_PASSWORD }}
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      DOCUMENT_STORAGE_DIR: /tmp/no-documents   # staging bytes live on Render, not here
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require secrets
+        id: check
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$NEO4J_URI" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::notice::staging backup secrets not set"; echo "run=false" >> "$GITHUB_OUTPUT"
+          else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: astral-sh/setup-uv@v5
+        if: steps.check.outputs.run == 'true'
+      - name: PostgreSQL client matching the server
+        if: steps.check.outputs.run == 'true'
+        run: |
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-client-17
+      - name: Encrypted backup
+        if: steps.check.outputs.run == 'true'
+        env:
+          PG_BIN_DIR: /usr/lib/postgresql/17/bin
+        run: |
+          uv sync
+          uv run python ../scripts/backup.py create --encrypt --out "/tmp/backup-$(date -u +%Y%m%dT%H%M%SZ)"
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.run == 'true'
+        with:
+          name: staging-backup-${{ github.run_id }}
+          path: /tmp/backup-*
+          retention-days: 7
+          if-no-files-found: error

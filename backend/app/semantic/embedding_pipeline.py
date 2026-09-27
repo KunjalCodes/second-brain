@@ -121,52 +121,62 @@ async def run_embedding_backfill_tick(
     driver rather than via a cross-database JOIN, which does not exist.
     """
     target = batch_size or settings.embedding_backfill_batch_size
-    # Scan a wider window than the embed budget: most scanned memories are
-    # expected to already be embedded (a live embed already ran for them), so a
-    # 1:1 scan:embed ratio would make almost no forward progress once the
-    # backlog is mostly caught up. Bounded all the same -- never unbounded.
-    scan_limit = target * 4
-    rows = await MemoryRepository(graph_client).list_for_backfill(
-        user_id=user_id, limit=scan_limit
-    )
+    # Keyset pages over ALL of the user's memories (Phase 11, J11), each
+    # anti-joined against `memory_embeddings` in one query, until the embed
+    # budget is spent or the scan reaches the end. `max_scan` bounds a single
+    # tick; `complete` tells the caller whether this user is fully covered.
+    page_size = max(target * 4, 50)
+    max_scan = settings.embedding_backfill_max_scan
+    repo = MemoryRepository(graph_client)
 
     scanned = 0
     embedded = 0
     skipped_already_present = 0
     failed = 0
-    for row in rows:
-        if embedded + failed >= target:
-            break  # per-tick embed/failure budget reached; resume next tick
-        scanned += 1
-        memory_id = row["id"]
-        content = row["content"]
+    after_id: str | None = None
+    reached_end = False
+    budget_spent = False
+    while scanned < max_scan and not budget_spent:
+        rows = await repo.list_for_backfill(user_id=user_id, limit=page_size, after_id=after_id)
+        if not rows:
+            reached_end = True
+            break
+        after_id = rows[-1]["id"]
         async with db.session() as session:
-            already = await EmbeddingRepository(session, user_id=user_id).exists(
-                memory_id=memory_id,
+            present = await EmbeddingRepository(session, user_id=user_id).existing_memory_ids(
+                memory_ids=[r["id"] for r in rows],
                 embedding_provider=settings.embedding_provider,
                 embedding_model=settings.embedding_model_resolved,
             )
-        if already:
-            skipped_already_present += 1
-            continue
-
-        stored = await embed_and_store_memory(
-            user_id=user_id,
-            memory_id=memory_id,
-            content=content,
-            db=db,
-            embedding_client=embedding_client,
-            settings=settings,
-            now_fn=now_fn,
-        )
-        if stored:
-            embedded += 1
-        else:
-            failed += 1
+        for row in rows:
+            if embedded + failed >= target:
+                budget_spent = True
+                break  # per-tick embed/failure budget reached; resume next tick
+            scanned += 1
+            if row["id"] in present:
+                skipped_already_present += 1
+                continue
+            stored = await embed_and_store_memory(
+                user_id=user_id,
+                memory_id=row["id"],
+                content=row["content"],
+                db=db,
+                embedding_client=embedding_client,
+                settings=settings,
+                now_fn=now_fn,
+            )
+            if stored:
+                embedded += 1
+            else:
+                failed += 1
+        if len(rows) < page_size and not budget_spent:
+            reached_end = True
+            break
 
     return {
         "scanned": scanned,
         "embedded": embedded,
         "skipped_already_present": skipped_already_present,
         "failed": failed,
+        "complete": int(reached_end and failed == 0),
     }

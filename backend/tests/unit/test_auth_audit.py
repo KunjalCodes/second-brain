@@ -236,6 +236,7 @@ def test_rate_limited_route_classes_are_wired() -> None:
         ("GET", "/graph/memories/{memory_id}/timeline"): "graph",
         ("POST", "/conversations/{conversation_id}/agent-turn"): "agent",
         ("POST", "/conversations/{conversation_id}/messages"): "message",
+        ("POST", "/conversations"): "write",
         ("POST", "/documents"): "ingest",
         ("POST", "/memories"): "write",
         ("PATCH", "/memories/{memory_id}"): "write",

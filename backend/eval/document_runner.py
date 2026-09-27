@@ -95,6 +95,7 @@ from app.services.provenance_service import ProvenanceService  # noqa: E402
 from app.services.retrieval_service import RetrievalService  # noqa: E402
 from app.storage.local import LocalDocumentStorage  # noqa: E402
 from eval.metrics import ScenarioResult, build_report  # noqa: E402
+from eval.opt_in import is_rate_limit_error, real_llm_requested  # noqa: E402
 from eval.persistence import EvaluationRunTracker, TaskOutcome  # noqa: E402
 
 #: Task ids meaningful as a real-agent question-answering check -- the ones
@@ -743,11 +744,10 @@ class RealLlmDocResult:
 
 
 def _is_rate_limit_error(error: str) -> bool:
-    """Mirrors `eval.agent_runner._is_rate_limit_error` -- `"429"` is the
-    one infra-failure shape Phase 7 requires distinguishing from every
-    other kind (quota, not a code/network problem).
-    """
-    return "429" in error
+    """Throttling is the one infra-failure shape Phase 7 requires
+    distinguishing (quota, not a code/network problem) -- see
+    `eval.opt_in.is_rate_limit_error`."""
+    return is_rate_limit_error(error)
 
 
 def _to_task_outcome(r: RealLlmDocResult) -> TaskOutcome:
@@ -902,17 +902,9 @@ async def main() -> int:
     tasks = load_dataset()
     print(f"Loaded {len(tasks)} document-eval tasks from {DATASET_PATH.name}\n")
 
-    run_real_llm = settings.llm_provider != "fake"
-    if not run_real_llm:
-        print(
-            "LLM_PROVIDER=fake -- skipping the REAL-LLM section entirely. Set "
-            "LLM_PROVIDER=gemini (+ LLM_MODEL, GEMINI_API_KEY) to run it.\n"
-        )
-    else:
-        print(
-            f"REAL-LLM section will use LLM_PROVIDER={settings.llm_provider!r} "
-            f"LLM_MODEL={settings.llm_model!r}\n"
-        )
+    # Phase 11: real-LLM evaluation is explicitly opt-in (eval/opt_in.py).
+    run_real_llm, why = real_llm_requested(settings)
+    print(why + "\n")
 
     db = Database(settings)
     graph = GraphClient(settings)

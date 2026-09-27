@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -190,3 +190,29 @@ class AuthRepository:
             stmt = stmt.where(AuthSession.id != except_session_id)
         result = await self._s.execute(stmt.values(revoked_at=now))
         return result.rowcount or 0
+
+
+async def delete_dead_sessions(
+    session: AsyncSession, *, dead_before: datetime, idle_dead_before: datetime, limit: int
+) -> int:
+    """Delete a bounded batch of sessions that can never authenticate again
+    (Phase 11, S2): revoked or absolutely expired before `dead_before`, or
+    unused since `idle_dead_before` (idle-expired). Cross-user maintenance run
+    by the sweeper, never by a request -- so it can never slow authentication.
+    `authenticate()` already rejects these rows; deleting them only bounds the
+    table. Keeping them for a retention window first leaves recent history
+    available when debugging a logout or revocation.
+    """
+    doomed = (
+        select(AuthSession.id)
+        .where(
+            or_(
+                AuthSession.revoked_at < dead_before,
+                AuthSession.expires_at < dead_before,
+                AuthSession.last_used_at < idle_dead_before,
+            )
+        )
+        .limit(limit)
+    )
+    result = await session.execute(delete(AuthSession).where(AuthSession.id.in_(doomed)))
+    return result.rowcount or 0

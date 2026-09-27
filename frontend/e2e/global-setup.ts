@@ -16,5 +16,12 @@ export default function globalSetup() {
   // A previous run kept its data (E2E_KEEP_DATA=1) or crashed: remove it first
   // so no seeded account is ever orphaned.
   if (existsSync(SEED_FILE)) seedScript("teardown", "--state", SEED_FILE);
-  seedScript("seed", "--out", SEED_FILE, "--hub-size", process.env.E2E_HUB_SIZE ?? "0");
+  seedScript(
+    "seed",
+    "--out",
+    SEED_FILE,
+    "--hub-size",
+    process.env.E2E_HUB_SIZE ?? "0",
+    ...(process.env.E2E_PERF_GRAPH === "1" ? ["--perf-graph"] : []),
+  );
 }

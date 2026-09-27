@@ -23,6 +23,41 @@ defaults:
     working-directory: backend
 
 jobs:
+  secret-scan:
+    name: Secret scan (offline)
+    # Phase 11: scripts/secret_scan.py -- no dependencies, no network. Fails
+    # on high-confidence credential shapes and on files that must never be
+    # committed (.env, keys, database dumps, backup archives).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan tracked files
+        run: python3 scripts/secret_scan.py
+
+  dependency-audit:
+    name: Dependency audit
+    # Phase 11: known-vulnerability check of the locked RUNTIME dependencies.
+    # Needs the vulnerability databases (network), so it is its own job: a
+    # service outage fails this job only, never the deterministic ones.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Python (pip-audit over the uv lockfile, runtime deps only)
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project > /tmp/requirements.txt
+          uvx pip-audit --strict --disable-pip --no-deps --timeout 60 -r /tmp/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Frontend (npm audit, production deps, high+)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
   lint:
     name: Ruff
     runs-on: ubuntu-latest

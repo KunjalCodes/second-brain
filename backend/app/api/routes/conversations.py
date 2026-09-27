@@ -17,6 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, Query, status
 
 from app.api.deps import (
     RATE_LIMIT_MESSAGE,
+    RATE_LIMIT_WRITE,
     ConversationServiceDep,
     CurrentUser,
     DbSessionDep,
@@ -78,6 +79,8 @@ async def _background_extraction_tick(
 
 @router.post(
     "",
+    # Phase 11: previously unlimited -- a cheap way to create unbounded rows.
+    dependencies=[RATE_LIMIT_WRITE],
     response_model=Conversation,
     status_code=status.HTTP_201_CREATED,
     summary="Create a conversation",

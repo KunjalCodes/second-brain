@@ -53,6 +53,10 @@ def _test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Iterator[Non
     # exercise it. scrypt cost is lowered for speed -- the production floor is
     # enforced only for production-like APP_ENV (tests/unit/test_auth_config.py).
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    # Phase 11: the in-process sweeper would claim jobs concurrently with the
+    # tests that drive the queue deterministically; tests that exercise it
+    # construct a `Sweeper` explicitly.
+    monkeypatch.setenv("SWEEP_INTERVAL_SECONDS", "0")
     monkeypatch.setenv("AUTH_SCRYPT_N", "1024")
     monkeypatch.setenv("AUTH_SCRYPT_P", "1")
     monkeypatch.setenv("LOG_LEVEL", "CRITICAL")

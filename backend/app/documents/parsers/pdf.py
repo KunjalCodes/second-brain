@@ -16,6 +16,9 @@ from pypdf.errors import PdfReadError
 
 from app.documents.parsers.base import DocumentParseError, ParsedDocument, ParsedPage
 
+#: ~5x what 500 chunks x 2000 chars can use; beyond this the text is not usable anyway.
+MAX_EXTRACTED_CHARS = 5_000_000
+
 
 def parse_pdf(data: bytes, *, max_pages: int, min_text_chars_per_page: int) -> ParsedDocument:
     """Extract text page by page.
@@ -35,7 +38,9 @@ def parse_pdf(data: bytes, *, max_pages: int, min_text_chars_per_page: int) -> P
         reader = PdfReader(io.BytesIO(data))
         page_count = len(reader.pages)
     except (PdfReadError, ValueError, OSError) as exc:
-        raise DocumentParseError("malformed_pdf", f"Could not read PDF: {exc}") from exc
+        raise DocumentParseError(
+            "malformed_pdf", "Could not read the PDF (the file appears to be damaged)"
+        ) from exc
 
     if page_count == 0:
         raise DocumentParseError("malformed_pdf", "PDF has no pages")
@@ -45,12 +50,24 @@ def parse_pdf(data: bytes, *, max_pages: int, min_text_chars_per_page: int) -> P
         )
 
     pages: list[ParsedPage] = []
+    extracted = 0
     try:
         for index, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""
+            extracted += len(text)
+            if extracted > MAX_EXTRACTED_CHARS:
+                # Phase 11 (S13): bound memory during extraction. A PDF whose
+                # text layer is this large (or a decompression bomb) is
+                # refused before the whole text is ever held at once.
+                raise DocumentParseError(
+                    "text_too_large",
+                    f"The PDF's text exceeds {MAX_EXTRACTED_CHARS} characters",
+                )
             pages.append(ParsedPage(page_number=index, text=text))
     except (PdfReadError, ValueError) as exc:
-        raise DocumentParseError("malformed_pdf", f"Could not extract PDF text: {exc}") from exc
+        raise DocumentParseError(
+            "malformed_pdf", "Could not extract text from the PDF (the file appears to be damaged)"
+        ) from exc
 
     total_chars = sum(len(page.text) for page in pages)
     mean_chars_per_page = total_chars / page_count

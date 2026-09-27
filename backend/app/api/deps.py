@@ -27,6 +27,7 @@ from app.core.errors import (
     UnauthorizedError,
     ValidationError,
 )
+from app.core.logging import bind_user
 from app.db.engine import Database, get_database
 from app.embeddings.base import EmbeddingClient
 from app.embeddings.factory import get_embedding_client
@@ -162,6 +163,7 @@ async def get_auth_context(
             and not origin_allowed(request, settings)
         ):
             raise OriginNotAllowedError()
+        bind_user(authenticated.account.user_id)
         return AuthContext(
             user_id=authenticated.account.user_id,
             mode="session",
@@ -169,8 +171,10 @@ async def get_auth_context(
             authenticated=authenticated,
         )
     if settings.effective_auth_mode == "dev_header":
+        dev_user_id = _dev_header_identity(request.headers.get("x-user-id"), settings)
+        bind_user(dev_user_id)
         return AuthContext(
-            user_id=_dev_header_identity(request.headers.get("x-user-id"), settings),
+            user_id=dev_user_id,
             mode="dev_header",
             via="dev_header",
         )

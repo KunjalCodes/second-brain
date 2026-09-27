@@ -1,0 +1,41 @@
+# Real-LLM evaluation -- MANUAL and EXPLICIT OPT-IN ONLY (Phase 11, M3).
+#
+# Spends provider quota. Runs only when triggered by hand AND the operator
+# confirms; the runners additionally require EVAL_REAL_LLM=1 (eval/opt_in.py).
+# Runs are persisted and resumable (eval/persistence.py): a run cut short by
+# HTTP 429 is reported INCOMPLETE -- never averaged or fabricated -- and a
+# later trigger resumes it.
+name: Real-LLM evaluation (manual, costs quota)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "spend-quota" to run real LLM calls'
+        required: true
+
+jobs:
+  real-llm:
+    if: inputs.confirm == 'spend-quota'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NEO4J_URI: ${{ secrets.NEO4J_URI }}
+      NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
+      NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LLM_PROVIDER: gemini
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      EMBEDDING_PROVIDER: fake
+      EVAL_REAL_LLM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - name: Agent evaluation (real LLM)
+        run: uv run python eval/agent_runner.py --real-llm
+      - name: Document evaluation (real LLM)
+        run: uv run python eval/document_runner.py --real-llm

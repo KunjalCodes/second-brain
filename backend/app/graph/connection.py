@@ -60,7 +60,7 @@ def _map_driver_error(exc: Exception, query: str) -> Exception:
         )
     if isinstance(exc, neo4j_exceptions.ConfigurationError):
         logger.error("Neo4j driver configuration error: %s", exc)
-        return ConfigurationError(f"Invalid graph database configuration: {exc}")
+        return ConfigurationError("Invalid graph database configuration")
     if isinstance(exc, neo4j_exceptions.CypherSyntaxError | neo4j_exceptions.CypherTypeError):
         # A programming error on our side: log the statement, return a generic message.
         logger.exception("Invalid Cypher submitted: %s", query)

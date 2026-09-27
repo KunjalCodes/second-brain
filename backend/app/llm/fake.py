@@ -145,3 +145,67 @@ def load_fixture[T: BaseModel](name: str, schema: type[T]) -> T:
         raise FileNotFoundError(f"No LLM fixture named {name!r} at {path}")
     data = json.loads(path.read_text())
     return schema.model_validate(data)
+
+
+OFFLINE_AGENT_ANSWER = (
+    "AI answers are turned off in this environment (no AI provider is configured). "
+    "Your message was saved, but no memories were searched to answer it."
+)
+
+
+class OfflineLLMClient:
+    """The process-wide client for `LLM_PROVIDER=fake` in a RUNNING app
+    (Phase 11; D7 makes fake AI the staging default).
+
+    An unscripted `FakeLLMClient` raises on every call, so before Phase 11 a
+    server with `LLM_PROVIDER=fake` failed every extraction job with
+    `internal_error` and every agent turn with HTTP 500 (measured in M0).
+    This client instead answers deterministically and honestly:
+
+    * extraction -> zero candidates (nothing is invented or stored);
+    * agent step -> a final answer saying AI answers are off, citing nothing;
+    * any other schema -> `LLMUnavailableError`.
+
+    Tests keep using `FakeLLMClient` with scripted responses.
+    """
+
+    provider_name = "offline"
+
+    async def complete_structured[T: BaseModel](
+        self,
+        *,
+        prompt: str,  # noqa: ARG002 - interface
+        schema: type[T],
+        temperature: float = 0.0,  # noqa: ARG002
+        max_tokens: int | None = None,  # noqa: ARG002
+        timeout: float | None = None,  # noqa: ARG002
+    ) -> LLMResult[T]:
+        from app.core.errors import LLMUnavailableError
+        from app.models.agent import AgentStep
+        from app.models.extraction import ExtractionResult
+
+        if schema is ExtractionResult:
+            raw = '{"candidates": []}'
+        elif schema is AgentStep:
+            raw = json.dumps(
+                {
+                    "step": {
+                        "action": "final_answer",
+                        "answer": OFFLINE_AGENT_ANSWER,
+                        "cited_memory_ids": [],
+                        "confidence": "low",
+                    }
+                }
+            )
+        else:
+            raise LLMUnavailableError("No AI provider is configured in this environment")
+        return LLMResult(
+            value=schema.model_validate_json(raw),
+            provider="offline",
+            model="none",
+            prompt_version="offline",
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=0,
+            raw=raw,
+        )

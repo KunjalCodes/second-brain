@@ -19,6 +19,7 @@ from app.api.deps import (
     AgentServiceDep,
     ConversationServiceDep,
     CurrentUser,
+    DbSessionDep,
     EmbeddingClientDep,
     LLMClientDep,
     SettingsDep,
@@ -90,6 +91,7 @@ async def run_agent_turn(
     llm_client: LLMClientDep,
     embedding_client: EmbeddingClientDep,
     settings: SettingsDep,
+    db_session: DbSessionDep,
 ) -> AgentTurnResponse:
     """`user_id` comes from `CurrentUser` (the same authenticated-request
     dependency every other endpoint uses) and is threaded through as a plain
@@ -150,6 +152,14 @@ async def run_agent_turn(
         content=result.answer,
     )
 
+    # Commit BEFORE returning (Phase 11, J10): FastAPI runs BackgroundTasks
+    # before the request session's commit-on-exit, so without this the
+    # extraction tick scheduled above could look for the user message's job
+    # before it is committed and find nothing (the same race
+    # `POST /conversations/{id}/messages` closes). Committing here -- after the
+    # turn succeeded -- keeps the turn atomic: if `run_turn` raised, nothing
+    # (not even the user message) was stored.
+    await db_session.commit()
     return AgentTurnResponse(
         message=assistant_message,
         cited_memory_ids=result.cited_memory_ids,

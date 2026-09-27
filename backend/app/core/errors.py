@@ -8,6 +8,7 @@ humans get an actionable message.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -97,6 +98,23 @@ class LLMUnavailableError(AppError):
     code = "llm_unavailable"
 
 
+class LLMRateLimitedError(LLMUnavailableError):
+    """The provider throttled the call (HTTP 429, or the process-wide cooldown
+    after repeated 429s is active). A subclass of `LLMUnavailableError`, so
+    every existing handler still treats it as transient; callers that can
+    wait without spending a retry (background jobs) check for it first.
+    `retry_after_seconds` is the provider's hint when it gave one.
+    """
+
+    code = "llm_rate_limited"
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        if retry_after_seconds is not None:
+            self.headers = {"Retry-After": str(max(1, math.ceil(retry_after_seconds)))}
+
+
 class LLMResponseInvalidError(AppError):
     """The provider replied, but the response did not satisfy the output schema.
 
@@ -125,6 +143,19 @@ class EmbeddingUnavailableError(AppError):
 
     status_code = 503
     code = "embedding_unavailable"
+
+
+class EmbeddingRateLimitedError(EmbeddingUnavailableError):
+    """The embedding provider throttled the call (HTTP 429 or cooldown) --
+    the embedding counterpart of `LLMRateLimitedError`."""
+
+    code = "embedding_rate_limited"
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        if retry_after_seconds is not None:
+            self.headers = {"Retry-After": str(max(1, math.ceil(retry_after_seconds)))}
 
 
 class VectorSearchUnavailableError(AppError):
@@ -232,3 +263,22 @@ class RateLimitedError(AppError):
             details={"limit_class": limit_class, "retry_after_seconds": retry_after_seconds},
         )
         self.headers = {"Retry-After": str(retry_after_seconds)}
+
+
+#: Failures of the infrastructure a job depends on, as opposed to a verdict
+#: about the data itself (Phase 11, docs/PHASE11_PLAN.md section 6, J1).
+#: Background jobs must treat these as RETRYABLE and must never record them
+#: as a semantic outcome (e.g. an `INVALID` extraction candidate): a Neo4j or
+#: PostgreSQL outage says nothing about whether a memory is valid.
+INFRASTRUCTURE_ERRORS: tuple[type[AppError], ...] = (
+    GraphUnavailableError,
+    GraphQueryError,
+    DatabaseUnavailableError,
+    DatabaseError,
+    ConfigurationError,
+    StorageUnavailableError,
+)
+
+
+def is_infrastructure_error(exc: BaseException) -> bool:
+    return isinstance(exc, INFRASTRUCTURE_ERRORS)

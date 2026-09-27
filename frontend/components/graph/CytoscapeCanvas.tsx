@@ -119,7 +119,7 @@ export function CytoscapeCanvas({
       });
       cy.on("dbltap", "node", (evt) => handlers.current.onExpand?.(evt.target.id()));
       cyRef.current = cy;
-      sync(cy, elementsRef.current, handlers.current.onRendered);
+      sync(cy, elementsRef.current, handlers.current.onRendered, container.current);
     });
     return () => {
       destroyed = true;
@@ -129,7 +129,7 @@ export function CytoscapeCanvas({
   }, []);
 
   useEffect(() => {
-    if (cyRef.current) sync(cyRef.current, elements, handlers.current.onRendered);
+    if (cyRef.current) sync(cyRef.current, elements, handlers.current.onRendered, container.current);
   }, [elements]);
 
   useEffect(() => {
@@ -153,7 +153,12 @@ export function CytoscapeCanvas({
 }
 
 /** Add new / remove stale elements, then lay out (new elements around the fixed old ones). */
-function sync(cy: Core, elements: CyElement[], onRendered?: (ms: number, count: number) => void): void {
+function sync(
+  cy: Core,
+  elements: CyElement[],
+  onRendered?: (ms: number, count: number) => void,
+  container?: HTMLElement | null,
+): void {
   const start = performance.now();
   const wanted = new Set(elements.map((e) => String(e.data.id)));
   cy.elements().forEach((el) => {
@@ -175,5 +180,20 @@ function sync(cy: Core, elements: CyElement[], onRendered?: (ms: number, count: 
     layout.run();
     if (firstRender) cy.fit(undefined, 30);
   }
-  onRendered?.(performance.now() - start, cy.elements().length);
+  const syncMs = performance.now() - start;
+  const count = cy.elements().length;
+  onRendered?.(syncMs, count);
+  // Phase 11 (M10): stage timings for performance measurement, readable by
+  // tests without any visible UI change -- layout (sync, incl. cose) and paint
+  // (time until two animation frames have been produced after layout).
+  if (container && added.length) {
+    const painted = performance.now();
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        container.dataset.layoutMs = syncMs.toFixed(1);
+        container.dataset.paintMs = (performance.now() - painted).toFixed(1);
+        container.dataset.elements = String(count);
+      }),
+    );
+  }
 }

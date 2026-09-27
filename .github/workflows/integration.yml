@@ -92,6 +92,19 @@ jobs:
             uv run alembic upgrade head
           fi
 
+      - name: Migration safety (single head, no autogenerate drift)
+        # Phase 11 (M7): `alembic check` fails if the models and migrations
+        # disagree -- including a proposal to drop the raw-SQL HNSW index,
+        # which env.py's include_object now prevents.
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -n "$DATABASE_URL" ]; then
+            test "$(uv run alembic heads | wc -l)" -eq 1
+            uv run alembic check
+          fi
+
       - name: Integration tests
         if: steps.check.outputs.configured == 'true'
         env:
@@ -99,7 +112,35 @@ jobs:
           NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
           NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: uv run pytest -m integration -v
+          # Phase 11: never an external LLM in this workflow.
+          LLM_PROVIDER: fake
+          EMBEDDING_PROVIDER: fake
+        run: uv run pytest -m "integration and not scratch_db" -v
+
+      - name: Migration tests on throwaway databases (skip if the role cannot CREATE DATABASE)
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run pytest -m scratch_db -v -rs
+
+      - name: Deterministic evaluations (no external LLM)
+        # Phase 11 (M11): graph API conformance and the retrieval regression.
+        # LLM_PROVIDER=fake is forced, and real-LLM sections are opt-in only
+        # (eval/opt_in.py), so this step can never spend provider quota.
+        if: steps.check.outputs.configured == 'true'
+        env:
+          NEO4J_URI: ${{ secrets.NEO4J_URI }}
+          NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
+          NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LLM_PROVIDER: fake
+          EMBEDDING_PROVIDER: fake
+        run: |
+          if [ -n "$NEO4J_URI" ] && [ -n "$DATABASE_URL" ]; then
+            uv run python eval/graph_api_runner.py
+            uv run python eval/retrieval_runner.py
+            uv run python eval/document_runner.py
+          fi
 
       - name: Fail if tests skipped despite both credentials configured
         # A silent skip here would mean neither store is actually covered while
@@ -111,9 +152,11 @@ jobs:
           NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
           NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LLM_PROVIDER: fake
+          EMBEDDING_PROVIDER: fake
         run: |
           set -o pipefail
-          uv run pytest -m integration -q 2>&1 | tee out.txt
+          uv run pytest -m "integration and not scratch_db" -q 2>&1 | tee out.txt
           if [ -n "$NEO4J_URI" ] && [ -n "$DATABASE_URL" ] && grep -q "skipped" out.txt; then
             echo "::error::Both credentials were configured but some integration tests skipped."
             exit 1

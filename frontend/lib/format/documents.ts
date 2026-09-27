@@ -9,7 +9,10 @@ export const DOCUMENT_ERROR: Record<string, string> = {
   too_many_chunks: "The document is too long to process (chunk limit exceeded).",
   parse_timeout: "Reading the document took too long and was stopped.",
   storage_unavailable: "The stored file wasn't available for processing.",
-  document_missing: "The stored file was missing when processing started.",
+  document_missing: "The uploaded file was no longer available when processing started. Upload it again.",
+  text_too_large: "The document contains more text than the server can process.",
+  extraction_failed: "No part of this document could be turned into memories.",
+  request_too_large: "The file is larger than the server allows.",
   internal_error: "An internal error stopped processing.",
 };
 

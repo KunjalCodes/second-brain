@@ -36,6 +36,29 @@ from app.db.models import EMBEDDING_DIMENSION
 logger = logging.getLogger(__name__)
 
 
+def _is_connection_failure(exc: BaseException) -> bool:
+    """Connection-level failures that reach us UNWRAPPED by SQLAlchemy.
+
+    Found by the Phase 11 PostgreSQL-outage drill: when the server refuses or
+    drops the connection while a new one is being established, asyncpg raises
+    `OSError`/`ConnectionRefusedError`/`TimeoutError` or its own
+    connection/target-attribute errors directly -- previously passed through
+    unmapped and returned as an opaque 500 instead of 503.
+    """
+    if isinstance(exc, OSError | TimeoutError | ConnectionError):
+        return True
+    try:
+        import asyncpg.exceptions as pg_errors
+    except ImportError:  # pragma: no cover - asyncpg is a hard dependency
+        return False
+    return isinstance(
+        exc,
+        pg_errors.PostgresConnectionError
+        | pg_errors.InterfaceError
+        | pg_errors.InternalClientError,
+    )
+
+
 def map_database_error(exc: Exception) -> Exception:
     """Translate a SQLAlchemy exception into the application's error taxonomy.
 
@@ -46,8 +69,8 @@ def map_database_error(exc: Exception) -> Exception:
         # Unique/foreign-key violations are expected control flow in the extraction
         # pipeline (idempotency), so they must be distinguishable from real faults.
         return ConflictError("The write violates a database constraint")
-    if isinstance(exc, OperationalError):
-        logger.error("PostgreSQL unavailable: %s", exc)
+    if isinstance(exc, OperationalError) or _is_connection_failure(exc):
+        logger.error("PostgreSQL unavailable: %s", type(exc).__name__)
         return DatabaseUnavailableError(
             "The database is currently unreachable. Please retry shortly."
         )
@@ -136,13 +159,22 @@ class Database:
             yield session
             await session.commit()
         except AppError:
-            await session.rollback()
+            await _safe_rollback(session)
             raise
         except Exception as exc:  # noqa: BLE001
-            await session.rollback()
+            await _safe_rollback(session)
             raise map_database_error(exc) from exc
         finally:
             await session.close()
+
+
+async def _safe_rollback(session: AsyncSession) -> None:
+    """Roll back without letting a SECOND failure (the connection is already
+    gone) replace the original, meaningful error."""
+    try:
+        await session.rollback()
+    except Exception:  # noqa: BLE001
+        logger.warning("session_rollback_failed (connection likely lost)")
 
 
 def _safe_dsn(url: str) -> str:

@@ -9,7 +9,7 @@ from __future__ import annotations
 from app.core.config import Settings, get_settings
 from app.core.errors import ConfigurationError
 from app.llm.base import LLMClient
-from app.llm.fake import FakeLLMClient
+from app.llm.fake import OfflineLLMClient
 
 
 def build_llm_client(settings: Settings | None = None) -> LLMClient:
@@ -17,8 +17,10 @@ def build_llm_client(settings: Settings | None = None) -> LLMClient:
 
     if settings.llm_provider == "fake":
         # A first-class configuration: the whole system runs end to end with no
-        # provider account at all, which is what keeps the test suite free.
-        return FakeLLMClient()
+        # provider account at all. In a running app that means the offline
+        # client (honest, deterministic answers -- Phase 11, D7); tests script
+        # `FakeLLMClient` directly.
+        return OfflineLLMClient()
 
     if settings.llm_provider == "gemini":
         from app.llm.providers.gemini import GeminiClient

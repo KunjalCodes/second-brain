@@ -28,5 +28,7 @@ class SweepResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reclaimed_leases: int
+    abandoned_exhausted: int
+    failed_targets: int
     rechecked_skipped: int
     jobs_processed: int

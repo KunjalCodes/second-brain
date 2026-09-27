@@ -16,13 +16,12 @@ committed, and silently find nothing.
 `TestClient`'s ASGI transport runs `BackgroundTasks` synchronously as part
 of the request/response cycle, so the background tick has already run by
 the time `client.post(...)` returns -- no polling needed. The process-wide
-`LLM_PROVIDER=fake` singleton (`app.llm.factory.build_llm_client`) is
-constructed with no scripted response, so the live tick's own extraction
-attempt always fails with a retryable `internal_error` -- that failure
-(`attempts=1`, `status="failed"`) is itself the proof the tick actually
-claimed and ran the job, i.e. that it observed the row this request just
-committed. A second, separately-scripted `run_worker_tick` call is used
-where a test needs to see the real extraction outcome.
+`LLM_PROVIDER=fake` singleton (`app.llm.factory.build_llm_client`) is the
+offline client (Phase 11), whose extraction completes with zero candidates --
+`attempts >= 1` is the proof the tick actually claimed and ran the job, i.e.
+that it observed the row this request just committed. A second,
+separately-scripted `run_worker_tick` call is used where a test needs to see
+the real extraction outcome.
 """
 
 from __future__ import annotations
@@ -162,12 +161,25 @@ class TestAppendMessageTriggersExtraction:
         does, must still reach the same `NEW` decision passive extraction
         has always reached for this exact scenario.
         """
-        conversation_id = _create_conversation(client)
-        response = client.post(
-            f"/conversations/{conversation_id}/messages",
-            json={"role": "user", "content": QUALIFYING_CONTENT},
-            headers={"X-User-Id": USER},
+        # Phase 11: the app's `LLM_PROVIDER=fake` client is now the offline
+        # client, whose extraction SUCCEEDS with zero candidates. This test's
+        # scenario needs the live tick's attempt to FAIL (leaving the job
+        # retryable), so script that failure explicitly for this request.
+        from app.api.deps import get_llm
+        from app.core.errors import LLMUnavailableError
+
+        client.app.dependency_overrides[get_llm] = lambda: FakeLLMClient(
+            failure=LLMUnavailableError("scripted live-tick failure")
         )
+        try:
+            conversation_id = _create_conversation(client)
+            response = client.post(
+                f"/conversations/{conversation_id}/messages",
+                json={"role": "user", "content": QUALIFYING_CONTENT},
+                headers={"X-User-Id": USER},
+            )
+        finally:
+            client.app.dependency_overrides.pop(get_llm, None)
         message_id = response.json()["id"]
 
         candidate = CandidateMemory(

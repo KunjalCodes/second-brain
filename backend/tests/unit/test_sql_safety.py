@@ -61,6 +61,9 @@ FORBIDDEN_NAMES = frozenset({"select", "update", "delete"})
 #: * rate_limit_repository.py  is Phase 9's abuse-control counter table: no
 #:   user-owned data, only `<class>:<identity>` keys and counts, and one limiter
 #:   must count across all callers (ADR 0023). See its module docstring.
+#: * ops_repository.py  is Phase 11's operational gauges for /internal/metrics:
+#:   aggregate COUNTS and ages only across all users (queue depth, stuck
+#:   documents, active sessions) -- it never returns a row, id or content.
 EXEMPT_FILES = frozenset(
     {
         "sql_base.py",
@@ -70,6 +73,7 @@ EXEMPT_FILES = frozenset(
         "evaluation_repository.py",
         "auth_repository.py",
         "rate_limit_repository.py",
+        "ops_repository.py",
         "__init__.py",
     }
 )
@@ -147,6 +151,7 @@ def test_exemptions_are_exactly_the_documented_set() -> None:
         "evaluation_repository.py",
         "auth_repository.py",
         "rate_limit_repository.py",
+        "ops_repository.py",
     }
 
 

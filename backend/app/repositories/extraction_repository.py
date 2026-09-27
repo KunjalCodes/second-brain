@@ -108,8 +108,14 @@ class ExtractionJobRepository(UserScopedRepository):
         window_end_sequence: int,
         extractor_version: str,
         now: datetime,
+        claimed_by: str | None = None,
     ) -> ExtractionJob:
         """Insert a job, or return the existing one for this idempotency key.
+
+        `claimed_by` creates the job already `in_progress` under that lease
+        token (Phase 11): used by the agent's synchronous memory tool, whose
+        job must never sit `pending` where a background worker could claim it
+        and run passive extraction on it concurrently.
 
         `ON CONFLICT (target_message_id, extractor_version) DO NOTHING` is the
         first idempotency layer (docs/PHASE2_PLAN.md section 7): if a job for this
@@ -126,7 +132,14 @@ class ExtractionJobRepository(UserScopedRepository):
                 window_start_sequence=window_start_sequence,
                 window_end_sequence=window_end_sequence,
                 extractor_version=extractor_version,
-                status=ExtractionJobStatus.PENDING.value,
+                status=(
+                    ExtractionJobStatus.IN_PROGRESS.value
+                    if claimed_by
+                    else ExtractionJobStatus.PENDING.value
+                ),
+                locked_by=claimed_by,
+                locked_at=now if claimed_by else None,
+                attempts=1 if claimed_by else 0,
                 created_at=now,
             )
             .on_conflict_do_nothing(

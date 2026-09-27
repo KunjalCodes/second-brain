@@ -1,0 +1,58 @@
+# Render Blueprint for the STAGING backend (Phase 11, M12; docs/DEPLOYMENT.md).
+# NOT production. Free web service: sleeps after 15 min idle (~1 min cold
+# start), ephemeral disk, 750 instance-hours/month (render.com/docs/free,
+# checked 2026-09-26). Untested against a live Render account -- the owner
+# applies it and records the result in docs/DEPLOYMENT_LOG.md.
+services:
+  - type: web
+    name: second-brain-api-staging
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    # Migrations are a MANUAL gate before deploy (docs/DEPLOYMENT.md step 3),
+    # never run at startup.
+    startCommand: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log --timeout-graceful-shutdown 20
+    healthCheckPath: /health/ready
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: APP_ENV
+        value: staging
+      - key: AUTH_MODE
+        value: session
+      - key: AUTH_REGISTRATION_ENABLED
+        value: "false"
+      # D7: offline AI by default, explicitly opted into.
+      - key: LLM_PROVIDER
+        value: fake
+      - key: EMBEDDING_PROVIDER
+        value: fake
+      - key: ALLOW_FAKE_AI
+        value: "true"
+      # D8: no interactive docs in staging.
+      - key: EXPOSE_DOCS
+        value: "false"
+      # D5: Render's proxy hides the client IP; no per-IP identity pretended.
+      - key: RATE_LIMIT_PER_IP
+        value: "false"
+      - key: LOG_FORMAT
+        value: json
+      - key: DOCUMENT_STORAGE_DIR
+        value: /tmp/second-brain/documents
+      - key: DOCUMENT_DELETE_BYTES_AFTER_INGESTION
+        value: "true"
+      # Secrets: set in the Render dashboard, never in this file.
+      - key: DATABASE_URL
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: INTERNAL_API_TOKEN
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false

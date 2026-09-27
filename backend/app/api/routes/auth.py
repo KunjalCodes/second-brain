@@ -54,6 +54,17 @@ def _user_view(account: AccountRecord) -> UserView:
     )
 
 
+def _network_bucket(
+    request: Request, settings: Settings, per_ip: LimitClass, global_class: LimitClass
+) -> tuple[LimitClass, str]:
+    """The per-IP bucket when the client IP is trustworthy; otherwise one
+    explicit service-wide bucket (Phase 11, D5) -- never a per-IP bucket that
+    is secretly shared."""
+    if settings.rate_limit_per_ip:
+        return per_ip, f"ip:{client_ip(request, settings)}"
+    return global_class, "global"
+
+
 def _email_bucket(email: str) -> str:
     """The per-email rate-limit identity: a digest, never the raw address."""
     try:
@@ -99,7 +110,11 @@ async def register(
     if not settings.registration_enabled:
         # Indistinguishable from an unknown route.
         raise HTTPException(status_code=404, detail="Not Found")
-    await limiter.enforce(LimitClass.AUTH_REGISTER, f"ip:{client_ip(request, settings)}")
+    await limiter.enforce(
+        *_network_bucket(
+            request, settings, LimitClass.AUTH_REGISTER, LimitClass.AUTH_REGISTER_GLOBAL
+        )
+    )
     account = await auth.register(email=payload.email, password=payload.password)
     return RegisterResponse(user=_user_view(account))
 
@@ -109,10 +124,13 @@ async def _enforce_login_limits(
 ) -> None:
     # Count BOTH buckets on every attempt (each commits in its own
     # transaction), then enforce -- so neither is skipped on a block.
-    ip_decision = await limiter.hit(LimitClass.AUTH_LOGIN_IP, f"ip:{client_ip(request, settings)}")
+    network_class, network_identity = _network_bucket(
+        request, settings, LimitClass.AUTH_LOGIN_IP, LimitClass.AUTH_LOGIN_GLOBAL
+    )
+    ip_decision = await limiter.hit(network_class, network_identity)
     email_decision = await limiter.hit(LimitClass.AUTH_LOGIN_EMAIL, _email_bucket(email))
     for limit_class, decision in (
-        (LimitClass.AUTH_LOGIN_IP, ip_decision),
+        (network_class, ip_decision),
         (LimitClass.AUTH_LOGIN_EMAIL, email_decision),
     ):
         if decision is not None and not decision.allowed:

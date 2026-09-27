@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models import DocumentChunk as ChunkRow
 from app.db.models import ExtractionJob as JobRow
 from app.db.models import Message as MessageRow
 from app.models.conversation import ExtractionStatus, Message, MessageRole
@@ -149,6 +150,36 @@ class ExtractionQueue:
         given_up = await self._session.execute(exhausted)
         return (retried.rowcount or 0) + (given_up.rowcount or 0)
 
+    def _owned(self, job_id: str, owner: str | None):  # noqa: ANN202
+        """WHERE clause for a completion write (Phase 11, J4).
+
+        With an `owner` (the lease token the claim wrote into `locked_by`), the
+        write applies only while that worker still holds the lease: once a
+        lease expires and `reclaim_expired_leases` clears `locked_by`, or
+        another worker re-claims the job, the stale worker's write matches zero
+        rows. The check is a conditional UPDATE, so it is enforced by the
+        database, not by application-level reads. `owner=None` keeps the
+        unconditional legacy behaviour for callers that never claimed.
+        """
+        clause = JobRow.id == job_id
+        if owner is not None:
+            clause = and_(
+                clause,
+                JobRow.status == ExtractionJobStatus.IN_PROGRESS.value,
+                JobRow.locked_by == owner,
+            )
+        return clause
+
+    async def renew_lease(self, *, job_id: str, owner: str, now: datetime) -> bool:
+        """Extend the lease of a job this worker still owns. False = lost it."""
+        stmt = (
+            update(JobRow)
+            .where(self._owned(job_id, owner))
+            .values(locked_at=now)
+        )
+        result = await self._session.execute(stmt)
+        return (result.rowcount or 0) == 1
+
     async def mark_done(
         self,
         *,
@@ -161,10 +192,11 @@ class ExtractionQueue:
         latency_ms: int,
         candidate_count: int,
         now: datetime,
-    ) -> None:
+        owner: str | None = None,
+    ) -> bool:
         stmt = (
             update(JobRow)
-            .where(JobRow.id == job_id)
+            .where(self._owned(job_id, owner))
             .values(
                 status=ExtractionJobStatus.DONE.value,
                 completed_at=now,
@@ -175,11 +207,15 @@ class ExtractionQueue:
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 candidate_count=candidate_count,
+                error_code=None,
+                error_detail=None,
+                next_attempt_at=None,
                 locked_at=None,
                 locked_by=None,
             )
         )
-        await self._session.execute(stmt)
+        result = await self._session.execute(stmt)
+        return (result.rowcount or 0) == 1
 
     async def mark_failed(
         self,
@@ -190,29 +226,124 @@ class ExtractionQueue:
         permanent: bool,
         next_attempt_at: datetime | None,
         now: datetime,
-    ) -> None:
+        owner: str | None = None,
+    ) -> bool:
         """Record a failure. The caller decides `permanent` (docs/PHASE2_PLAN.md
         section 9): a config/auth error never retries; a transient one gets a
         `next_attempt_at` and is retried through the normal claim path, bounded by
-        `max_attempts` there.
+        `max_attempts` there. Returns False when `owner` no longer holds the
+        lease (the write was not applied).
         """
         status = (
             ExtractionJobStatus.ABANDONED if permanent else ExtractionJobStatus.FAILED
         )
         stmt = (
             update(JobRow)
-            .where(JobRow.id == job_id)
+            .where(self._owned(job_id, owner))
             .values(
                 status=status.value,
                 error_code=error_code,
-                error_detail=error_detail,
+                error_detail=error_detail[:500],
                 next_attempt_at=None if permanent else next_attempt_at,
                 completed_at=now if permanent else None,
                 locked_at=None,
                 locked_by=None,
             )
         )
-        await self._session.execute(stmt)
+        result = await self._session.execute(stmt)
+        return (result.rowcount or 0) == 1
+
+    async def defer(
+        self, *, job_id: str, owner: str, until: datetime, error_code: str, error_detail: str
+    ) -> bool:
+        """Put an owned job back to `failed` WITHOUT consuming an attempt.
+
+        For failures that say nothing about the job itself -- provider
+        throttling (HTTP 429 / cooldown) or a busy shared resource -- so a long
+        provider outage cannot exhaust `max_attempts` and abandon healthy work
+        (Phase 11, docs/PHASE11_PLAN.md section 12). Bounded separately by the
+        caller's max-age check.
+        """
+        stmt = (
+            update(JobRow)
+            .where(self._owned(job_id, owner))
+            .values(
+                status=ExtractionJobStatus.FAILED.value,
+                attempts=JobRow.attempts - 1,
+                error_code=error_code,
+                error_detail=error_detail[:500],
+                next_attempt_at=until,
+                locked_at=None,
+                locked_by=None,
+            )
+        )
+        result = await self._session.execute(stmt)
+        return (result.rowcount or 0) == 1
+
+    async def abandon_exhausted(self, *, max_attempts: int, now: datetime) -> int:
+        """Make retry exhaustion explicit (Phase 11, J5).
+
+        A `failed` job with no attempts left is never claimed again, so leaving
+        it `failed` makes it indistinguishable from work that is merely waiting
+        for its backoff. It becomes `abandoned`, keeping its last `error_code`
+        and `error_detail`.
+        """
+        stmt = (
+            update(JobRow)
+            .where(
+                JobRow.status == ExtractionJobStatus.FAILED.value,
+                JobRow.attempts >= max_attempts,
+            )
+            .values(
+                status=ExtractionJobStatus.ABANDONED.value,
+                completed_at=now,
+                next_attempt_at=None,
+            )
+        )
+        result = await self._session.execute(stmt)
+        return result.rowcount or 0
+
+    async def fail_targets_of_abandoned_jobs(self) -> tuple[int, list[tuple[str, str]]]:
+        """Propagate `abandoned` to the job's target (Phase 11, J5/J7).
+
+        Idempotent. A message whose passive extraction job was abandoned
+        becomes `failed` instead of `queued` forever; a document chunk becomes
+        `failed`, so its document can finalize. Returns the number of messages
+        updated and the `(user_id, document_id)` pairs whose chunks changed.
+        """
+        abandoned_messages = select(JobRow.target_message_id).where(
+            JobRow.status == ExtractionJobStatus.ABANDONED.value,
+            JobRow.target_message_id.is_not(None),
+            JobRow.extractor_version.not_like("agent:%"),
+        )
+        non_terminal = (
+            ExtractionStatus.PENDING.value,
+            ExtractionStatus.QUEUED.value,
+            ExtractionStatus.IN_PROGRESS.value,
+        )
+        messages = await self._session.execute(
+            update(MessageRow)
+            .where(
+                MessageRow.id.in_(abandoned_messages),
+                MessageRow.extraction_status.in_(non_terminal),
+            )
+            .values(extraction_status=ExtractionStatus.FAILED.value)
+        )
+        abandoned_chunks = select(JobRow.target_chunk_id).where(
+            JobRow.status == ExtractionJobStatus.ABANDONED.value,
+            JobRow.target_chunk_id.is_not(None),
+        )
+        chunks = await self._session.execute(
+            update(ChunkRow)
+            .where(
+                ChunkRow.id.in_(abandoned_chunks),
+                ChunkRow.extraction_status.in_(non_terminal),
+            )
+            .values(extraction_status=ExtractionStatus.FAILED.value)
+            .returning(ChunkRow.user_id, ChunkRow.document_id)
+        )
+        documents = sorted({(row[0], row[1]) for row in chunks})
+        return messages.rowcount or 0, documents
 
     async def list_skipped_for_recheck(
         self, *, lookback_days: int, limit: int, now: datetime

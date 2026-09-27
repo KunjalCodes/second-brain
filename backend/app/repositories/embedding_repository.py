@@ -112,6 +112,21 @@ class EmbeddingRepository(UserScopedRepository):
         result = await self._session.execute(stmt)
         return result.first() is not None
 
+    async def existing_memory_ids(
+        self, *, memory_ids: list[str], embedding_provider: str, embedding_model: str
+    ) -> set[str]:
+        """Which of `memory_ids` already have a row for `(provider, model)` --
+        the backfill's anti-join for one page, in a single query."""
+        if not memory_ids:
+            return set()
+        stmt = self._select_columns(EmbeddingRow, EmbeddingRow.memory_id).where(
+            EmbeddingRow.memory_id.in_(memory_ids),
+            EmbeddingRow.embedding_provider == embedding_provider,
+            EmbeddingRow.embedding_model == embedding_model,
+        )
+        result = await self._session.execute(stmt)
+        return {row[0] for row in result}
+
     async def search(
         self,
         *,

@@ -84,9 +84,17 @@ class TestHealth:
     def test_liveness_includes_a_request_id_header(self, client: TestClient) -> None:
         assert client.get("/health").headers.get("X-Request-ID")
 
-    def test_supplied_request_id_is_echoed(self, client: TestClient) -> None:
+    def test_supplied_request_id_is_kept_for_correlation_but_never_canonical(
+        self, client: TestClient
+    ) -> None:
+        # Phase 11 (M5): the canonical id is always server-generated.
         response = client.get("/health", headers={"X-Request-ID": "trace-123"})
-        assert response.headers["X-Request-ID"] == "trace-123"
+        assert response.headers["X-Request-ID"] != "trace-123"
+        assert response.headers["X-Client-Request-ID"] == "trace-123"
+
+    def test_malformed_client_request_id_is_dropped(self, client: TestClient) -> None:
+        response = client.get("/health", headers={"X-Request-ID": "x\r\nforged: 1" + "a" * 80})
+        assert "X-Client-Request-ID" not in response.headers
 
 
 class TestCreateMemory:
@@ -457,11 +465,22 @@ class TestCors:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         with self._app(
-            monkeypatch, CORS_ALLOW_VERCEL_PREVIEWS="true", CORS_VERCEL_PROJECT="brain"
+            monkeypatch,
+            CORS_ALLOW_VERCEL_PREVIEWS="true",
+            CORS_VERCEL_PROJECT="brain",
+            CORS_VERCEL_TEAM_SCOPE="me",
         ) as c:
             ok = c.get("/health", headers={"Origin": "https://brain-git-abc123-me.vercel.app"})
             other = c.get("/health", headers={"Origin": "https://evil.vercel.app"})
             lookalike = c.get("/health", headers={"Origin": "https://evil-brain.vercel.app"})
+            # Phase 11 (S7): someone else's project named "brain-evil" used to
+            # match `brain(-[a-z0-9-]+)?.vercel.app`.
+            prefixed = c.get("/health", headers={"Origin": "https://brain-evil.vercel.app"})
+            other_scope = c.get(
+                "/health", headers={"Origin": "https://brain-git-abc123-attacker.vercel.app"}
+            )
+        assert prefixed.headers.get("access-control-allow-origin") is None
+        assert other_scope.headers.get("access-control-allow-origin") is None
         assert ok.headers.get("access-control-allow-origin") == (
             "https://brain-git-abc123-me.vercel.app"
         )

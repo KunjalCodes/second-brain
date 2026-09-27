@@ -17,3 +17,8 @@ class EmbeddingBackfillResult(BaseModel):
     embedded: int
     skipped_already_present: int
     failed: int
+    #: Users in this page whose every memory is now embedded (Phase 11).
+    users_complete: int
+    #: Pass as `user_offset` to continue with the next page of users; `None`
+    #: when this page was the last.
+    next_user_offset: int | None

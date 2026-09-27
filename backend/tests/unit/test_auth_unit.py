@@ -65,6 +65,10 @@ def _prod(**kw: object) -> Settings:
         "auth_scrypt_n": 2**15,
         "auth_scrypt_r": 8,
         "auth_scrypt_p": 3,
+        # Phase 11 deployment requirements (tests/unit/test_production_config.py).
+        "internal_api_token": "t" * 40,
+        "allow_fake_ai": True,
+        "document_storage_dir": "/srv/documents",
     }
     base.update(kw)
     return _settings(**base)
@@ -185,9 +189,18 @@ class TestOriginCheck:
         assert origin_allowed(req, _settings())
 
     def test_named_vercel_project_preview_only(self) -> None:
-        s = _settings(cors_allow_vercel_previews=True, cors_vercel_project="brain")
+        s = _settings(
+            cors_allow_vercel_previews=True,
+            cors_vercel_project="brain",
+            cors_vercel_team_scope="me",
+        )
         assert origin_allowed(_request(headers={"Origin": "https://brain-git-x-me.vercel.app"}), s)
+        assert origin_allowed(
+            _request(headers={"Origin": "https://brain-a1b2c3d4e-me.vercel.app"}), s
+        )
         assert not origin_allowed(_request(headers={"Origin": "https://evil.vercel.app"}), s)
+        # Phase 11 (S7): another account's project named "brain-evil".
+        assert not origin_allowed(_request(headers={"Origin": "https://brain-evil.vercel.app"}), s)
 
 
 class TestClientIp:
@@ -269,6 +282,12 @@ class TestProductionSafety:
     def test_wildcard_vercel_previews_refused_everywhere(self) -> None:
         with pytest.raises(PydanticValidationError, match="CORS_VERCEL_PROJECT"):
             _settings(app_env="development", cors_allow_vercel_previews=True)
+        with pytest.raises(PydanticValidationError, match="CORS_VERCEL_TEAM_SCOPE"):
+            _settings(
+                app_env="development",
+                cors_allow_vercel_previews=True,
+                cors_vercel_project="brain",
+            )
 
     def test_contradicting_identity_settings_refused(self) -> None:
         with pytest.raises(PydanticValidationError, match="contradict"):

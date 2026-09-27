@@ -41,10 +41,13 @@ from app.core.config import Settings
 from app.core.errors import (
     AppError,
     ConfigurationError,
+    LLMRateLimitedError,
     LLMResponseInvalidError,
     LLMUnavailableError,
     NotFoundError,
+    is_infrastructure_error,
 )
+from app.core.logging import bind_job, reset_job
 from app.db.engine import Database
 from app.embeddings.base import EmbeddingClient
 from app.extraction.decisions import (
@@ -144,6 +147,53 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+async def finalize_document(
+    *, db: Database, user_id: str, document_id: str, now: datetime
+) -> None:
+    """Roll a document's coarse status up once every one of its chunks has
+    reached a terminal extraction_status (DONE or FAILED) -- the document-only
+    analogue of a step conversation jobs never need (PHASE6_PLAN.md section 3's
+    `DocumentStatus` lifecycle). A no-op, safe to call repeatedly, while any
+    chunk is still pending/queued/in progress.
+
+    COMPLETE when every chunk is DONE; PARTIALLY_COMPLETE when some are DONE
+    and some FAILED; FAILED (`extraction_failed`) when none succeeded -- so a
+    document whose extraction entirely failed is never shown as partly done.
+    """
+    async with db.session() as session:
+        counts = await DocumentChunkRepository(
+            session, user_id=user_id
+        ).count_by_extraction_status(document_id=document_id)
+    non_terminal = sum(
+        counts.get(status.value, 0)
+        for status in (
+            ExtractionStatus.PENDING,
+            ExtractionStatus.QUEUED,
+            ExtractionStatus.IN_PROGRESS,
+        )
+    )
+    if non_terminal > 0 or not counts:
+        return
+    failed = counts.get(ExtractionStatus.FAILED.value, 0)
+    done = counts.get(ExtractionStatus.DONE.value, 0)
+    async with db.session() as session:
+        repo = DocumentRepository(session, user_id=user_id)
+        if failed and not done:
+            await repo.set_status(
+                document_id=document_id,
+                status=DocumentStatus.FAILED,
+                error_code="extraction_failed",
+                error_detail="No chunk of this document could be extracted",
+                processed_at=now,
+            )
+        else:
+            await repo.set_status(
+                document_id=document_id,
+                status=DocumentStatus.PARTIALLY_COMPLETE if failed else DocumentStatus.COMPLETE,
+                processed_at=now,
+            )
+
+
 class ExtractionRunner:
     """Processes exactly one claimed job per `run` call.
 
@@ -179,10 +229,26 @@ class ExtractionRunner:
         db: Database,
         _after_candidate: Callable[[int], None] | None = None,
     ) -> None:
+        """Process one job with `job_id` bound into every log line (Phase 11, M5)."""
+        tokens = bind_job(job.id, "extraction")
+        try:
+            await self._run(job, db=db, _after_candidate=_after_candidate)
+        finally:
+            reset_job(tokens)
+
+    async def _run(
+        self,
+        job: ExtractionJob,
+        *,
+        db: Database,
+        _after_candidate: Callable[[int], None] | None = None,
+    ) -> None:
         """Process one already-claimed job to completion (done/failed/abandoned).
 
         Never raises: every failure path records itself on the job and returns, so
-        one bad job cannot crash a worker tick processing several.
+        one bad job cannot crash a worker tick processing several. (If even the
+        failure bookkeeping cannot reach PostgreSQL, the error is logged and the
+        job stays `in_progress`; its lease expires and the sweep reclaims it.)
 
         Each candidate's PostgreSQL bookkeeping (`record_candidate`/`mark_applied`,
         plus any ambiguity flags) is committed in its own short session immediately
@@ -192,11 +258,23 @@ class ExtractionRunner:
         crash is durably recorded and will not be reprocessed, so at most the
         *one* candidate that was in flight when the crash happened can possibly be
         duplicated on retry -- never repeatedly, and never any candidate before it.
+
+        Lease ownership (Phase 11, J4): `job.locked_by` is this claim's lease
+        token. The lease is renewed before the LLM call's result is applied and
+        before every candidate; every completion write is conditional on still
+        owning it. A worker that lost its lease stops before writing anything
+        further and can never overwrite the new owner's result.
+
+        Infrastructure failures (Phase 11, J1) -- Neo4j or PostgreSQL
+        unavailable -- make the job retryable; they are never recorded as a
+        semantic verdict on a candidate.
+
         `_after_candidate` is a testing seam only (mirrors `now_fn`/`id_fn`): a hook
         invoked after each candidate's commit, used to deterministically simulate a
         crash at an exact point in the loop.
         """
         now = self._now()
+        owner = job.locked_by
         memory_service = MemoryService(
             MemoryRepository(self._graph), now_fn=self._now, id_fn=self._new_id
         )
@@ -209,6 +287,8 @@ class ExtractionRunner:
         is_document_job = job.source_kind is ExtractionSourceKind.DOCUMENT_CHUNK
 
         try:
+            if not await self._renew(job, db=db):
+                return
             if is_document_job:
                 async with db.session() as session:
                     window = await DocumentChunkRepository(
@@ -220,15 +300,14 @@ class ExtractionRunner:
                     )
                 target = next((c for c in window if c.id == job.target_chunk_id), None)
                 if target is None:
-                    async with db.session() as session:
-                        await ExtractionQueue(session).mark_failed(
-                            job_id=job.id,
-                            error_code="target_chunk_missing",
-                            error_detail="the job's target chunk was not found in its own window",
-                            permanent=True,
-                            next_attempt_at=None,
-                            now=now,
-                        )
+                    await self._fail(
+                        job,
+                        db=db,
+                        now=now,
+                        error_code="target_chunk_missing",
+                        error_detail="the job's target chunk was not found in its own window",
+                        permanent=True,
+                    )
                     return
                 source_type = SourceType.DOCUMENT
                 source_reference = job.document_id
@@ -254,83 +333,52 @@ class ExtractionRunner:
                     )
                 target = next((m for m in window if m.id == job.target_message_id), None)
                 if target is None:
-                    async with db.session() as session:
-                        await ExtractionQueue(session).mark_failed(
-                            job_id=job.id,
-                            error_code="target_message_missing",
-                            error_detail="the job's target message was not found in its own window",
-                            permanent=True,
-                            next_attempt_at=None,
-                            now=now,
-                        )
+                    await self._fail(
+                        job,
+                        db=db,
+                        now=now,
+                        error_code="target_message_missing",
+                        error_detail="the job's target message was not found in its own window",
+                        permanent=True,
+                    )
                     return
                 source_type = SourceType.MESSAGE
                 source_reference = target.id
                 source_location_prefix = None
                 result = await self._extract(window=window, target_message_id=job.target_message_id)
+        except LLMRateLimitedError as exc:
+            await self._defer_for_provider(job, db=db, now=now, exc=exc)
+            return
         except LLMUnavailableError as exc:
-            async with db.session() as session:
-                await ExtractionQueue(session).mark_failed(
-                    job_id=job.id,
-                    error_code="llm_unavailable",
-                    error_detail=exc.message,
-                    permanent=False,
-                    next_attempt_at=now + _retry_backoff(job.attempts),
-                    now=now,
-                )
+            await self._fail(
+                job, db=db, now=now, error_code="llm_unavailable", error_detail=exc.message
+            )
             return
         except LLMResponseInvalidError as exc:
             # The one repair attempt already happened inside `_extract`; a second
             # failure here is not retried -- resending the same prompt would most
             # likely reproduce the same malformed output (docs/adr/0007).
-            async with db.session() as session:
-                await ExtractionQueue(session).mark_failed(
-                    job_id=job.id,
-                    error_code="llm_response_invalid",
-                    error_detail=exc.message,
-                    permanent=True,
-                    next_attempt_at=None,
-                    now=now,
-                )
-                if is_document_job:
-                    await DocumentChunkRepository(
-                        session, user_id=job.user_id
-                    ).set_extraction_status(
-                        chunk_id=job.target_chunk_id, status=ExtractionStatus.FAILED
-                    )
-            if is_document_job:
-                await self._maybe_finalize_document(db=db, job=job, now=now)
+            await self._fail(
+                job,
+                db=db,
+                now=now,
+                error_code="llm_response_invalid",
+                error_detail=exc.message,
+                permanent=True,
+            )
             return
         except ConfigurationError as exc:
-            async with db.session() as session:
-                await ExtractionQueue(session).mark_failed(
-                    job_id=job.id,
-                    error_code="configuration_error",
-                    error_detail=exc.message,
-                    permanent=True,
-                    next_attempt_at=None,
-                    now=now,
-                )
-                if is_document_job:
-                    await DocumentChunkRepository(
-                        session, user_id=job.user_id
-                    ).set_extraction_status(
-                        chunk_id=job.target_chunk_id, status=ExtractionStatus.FAILED
-                    )
-            if is_document_job:
-                await self._maybe_finalize_document(db=db, job=job, now=now)
+            await self._fail(
+                job,
+                db=db,
+                now=now,
+                error_code="configuration_error",
+                error_detail=exc.message,
+                permanent=True,
+            )
             return
         except Exception as exc:  # noqa: BLE001 - never let an unexpected error strand a job in_progress
-            logger.exception("Unexpected error extracting job %s", job.id)
-            async with db.session() as session:
-                await ExtractionQueue(session).mark_failed(
-                    job_id=job.id,
-                    error_code="internal_error",
-                    error_detail=str(exc),
-                    permanent=False,
-                    next_attempt_at=now + _retry_backoff(job.attempts),
-                    now=now,
-                )
+            await self._fail_unexpected(job, db=db, now=now, exc=exc, stage="extracting")
             return
 
         # Every message's content in the window, for the entity-grounding check's
@@ -351,6 +399,8 @@ class ExtractionRunner:
                     # Idempotency layer 2: a previous, interrupted attempt already
                     # applied this exact candidate -- do not apply it twice.
                     continue
+                if not await self._renew(job, db=db):
+                    return
 
                 async with db.session() as session:
                     candidates_repo = ExtractionCandidateRepository(session, user_id=job.user_id)
@@ -421,76 +471,185 @@ class ExtractionRunner:
                 # will never be reprocessed, regardless of what happens next.
                 if _after_candidate is not None:
                     _after_candidate(ordinal)
-        except Exception as exc:  # noqa: BLE001 - see the docstring's "never raises" contract
-            logger.exception("Unexpected error applying candidates for job %s", job.id)
-            async with db.session() as session:
-                await ExtractionQueue(session).mark_failed(
-                    job_id=job.id,
-                    error_code="internal_error",
-                    error_detail=str(exc),
-                    permanent=False,
-                    next_attempt_at=now + _retry_backoff(job.attempts),
-                    now=now,
+        except AppError as exc:
+            if is_infrastructure_error(exc):
+                # Retryable: the candidates not yet applied are retried under
+                # idempotency layer 2 once the dependency is back.
+                logger.warning(
+                    "extraction_job_infrastructure_failure job_id=%s code=%s",
+                    job.id,
+                    exc.code,
                 )
-            return
-
-        async with db.session() as session:
-            if is_document_job:
-                await DocumentChunkRepository(session, user_id=job.user_id).set_extraction_status(
-                    chunk_id=job.target_chunk_id, status=ExtractionStatus.DONE
+                await self._fail(
+                    job, db=db, now=now, error_code=exc.code, error_detail=exc.message
                 )
             else:
-                await MessageRepository(session, user_id=job.user_id).set_extraction_status(
-                    message_id=job.target_message_id, status=ExtractionStatus.DONE
+                await self._fail_unexpected(job, db=db, now=now, exc=exc, stage="applying")
+            return
+        except Exception as exc:  # noqa: BLE001 - see the docstring's "never raises" contract
+            await self._fail_unexpected(job, db=db, now=now, exc=exc, stage="applying")
+            return
+
+        try:
+            async with db.session() as session:
+                completed = await ExtractionQueue(session).mark_done(
+                    job_id=job.id,
+                    provider=result.provider,
+                    model=result.model,
+                    prompt_version=result.prompt_version,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    latency_ms=result.latency_ms,
+                    candidate_count=len(result.value.candidates),
+                    now=now,
+                    owner=owner,
                 )
-            await ExtractionQueue(session).mark_done(
-                job_id=job.id,
-                provider=result.provider,
-                model=result.model,
-                prompt_version=result.prompt_version,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                latency_ms=result.latency_ms,
-                candidate_count=len(result.value.candidates),
-                now=now,
-            )
+                if not completed:
+                    logger.warning(
+                        "extraction_job_lease_lost job_id=%s owner=%s stage=complete",
+                        job.id,
+                        owner,
+                    )
+                    return
+                if is_document_job:
+                    await DocumentChunkRepository(
+                        session, user_id=job.user_id
+                    ).set_extraction_status(
+                        chunk_id=job.target_chunk_id, status=ExtractionStatus.DONE
+                    )
+                else:
+                    await MessageRepository(session, user_id=job.user_id).set_extraction_status(
+                        message_id=job.target_message_id, status=ExtractionStatus.DONE
+                    )
+        except Exception:  # noqa: BLE001 - lease expiry recovers the job
+            logger.exception("extraction_job_completion_write_failed job_id=%s", job.id)
+            return
 
         if is_document_job:
-            await self._maybe_finalize_document(db=db, job=job, now=now)
-
-    async def _maybe_finalize_document(
-        self, *, db: Database, job: ExtractionJob, now: datetime
-    ) -> None:
-        """Roll a document's coarse status up to COMPLETE/PARTIALLY_COMPLETE
-        once every one of its chunks has reached a terminal extraction_status
-        (DONE or FAILED) -- the document-only analogue of a step conversation
-        jobs never need, since a message has no parent entity whose status
-        depends on its siblings (PHASE6_PLAN.md section 3's `DocumentStatus`
-        lifecycle). A no-op, safe to call repeatedly, while any chunk is
-        still pending/queued/in progress.
-        """
-        async with db.session() as session:
-            counts = await DocumentChunkRepository(
-                session, user_id=job.user_id
-            ).count_by_extraction_status(document_id=job.document_id)
-        non_terminal = sum(
-            counts.get(status.value, 0)
-            for status in (
-                ExtractionStatus.PENDING,
-                ExtractionStatus.QUEUED,
-                ExtractionStatus.IN_PROGRESS,
+            await finalize_document(
+                db=db, user_id=job.user_id, document_id=job.document_id, now=now
             )
-        )
-        if non_terminal > 0:
-            return
-        document_status = (
-            DocumentStatus.PARTIALLY_COMPLETE
-            if counts.get(ExtractionStatus.FAILED.value, 0)
-            else DocumentStatus.COMPLETE
-        )
+
+    async def _renew(self, job: ExtractionJob, *, db: Database) -> bool:
+        """Renew this claim's lease; False (and a log line) if it was lost."""
+        if job.locked_by is None:
+            return True
         async with db.session() as session:
-            await DocumentRepository(session, user_id=job.user_id).set_status(
-                document_id=job.document_id, status=document_status, processed_at=now
+            owned = await ExtractionQueue(session).renew_lease(
+                job_id=job.id, owner=job.locked_by, now=self._now()
+            )
+        if not owned:
+            logger.warning(
+                "extraction_job_lease_lost job_id=%s owner=%s", job.id, job.locked_by
+            )
+        return owned
+
+    async def _fail(
+        self,
+        job: ExtractionJob,
+        *,
+        db: Database,
+        now: datetime,
+        error_code: str,
+        error_detail: str,
+        permanent: bool = False,
+    ) -> None:
+        """Record a failure on an owned job; never raises.
+
+        A retryable failure on the job's last allowed attempt becomes terminal
+        (`abandoned`) immediately, so retry exhaustion is always explicit
+        (Phase 11, J5). A terminal failure also marks the job's target
+        (message or chunk) `failed` and lets the document finalize.
+        """
+        exhausted = not permanent and job.attempts >= self._settings.extraction_max_attempts
+        if exhausted:
+            error_detail = f"retries exhausted after {job.attempts} attempts: {error_detail}"
+        terminal = permanent or exhausted
+        try:
+            async with db.session() as session:
+                applied = await ExtractionQueue(session).mark_failed(
+                    job_id=job.id,
+                    error_code=error_code,
+                    error_detail=error_detail,
+                    permanent=terminal,
+                    next_attempt_at=None if terminal else now + _retry_backoff(job.attempts),
+                    now=now,
+                    owner=job.locked_by,
+                )
+                if not applied:
+                    logger.warning(
+                        "extraction_job_lease_lost job_id=%s owner=%s stage=fail",
+                        job.id,
+                        job.locked_by,
+                    )
+                    return
+                if terminal:
+                    await self._mark_target_failed(job, session=session)
+        except Exception:  # noqa: BLE001 - lease expiry recovers the job
+            logger.exception("extraction_job_failure_write_failed job_id=%s", job.id)
+            return
+        if terminal and job.source_kind is ExtractionSourceKind.DOCUMENT_CHUNK:
+            await finalize_document(
+                db=db, user_id=job.user_id, document_id=job.document_id, now=now
+            )
+
+    async def _fail_unexpected(
+        self, job: ExtractionJob, *, db: Database, now: datetime, exc: Exception, stage: str
+    ) -> None:
+        # The traceback goes to the log; the job row (readable by the user via
+        # GET /extraction/jobs/{id}) gets a safe, generic description only.
+        logger.exception("extraction_job_unexpected_error job_id=%s stage=%s", job.id, stage)
+        await self._fail(
+            job,
+            db=db,
+            now=now,
+            error_code="internal_error",
+            error_detail=f"unexpected {type(exc).__name__} while {stage}",
+        )
+
+    async def _defer_for_provider(
+        self, job: ExtractionJob, *, db: Database, now: datetime, exc: LLMRateLimitedError
+    ) -> None:
+        """Provider throttling (HTTP 429 / cooldown) does not consume an attempt,
+        up to `llm_throttle_max_age_seconds` after the job was created; past that
+        it is a normal (attempt-consuming) `llm_unavailable` failure, so the job
+        still reaches a terminal state (Phase 11, docs/PHASE11_PLAN.md section 12).
+        """
+        age = (now - job.created_at).total_seconds()
+        if age > self._settings.llm_throttle_max_age_seconds or job.locked_by is None:
+            await self._fail(
+                job, db=db, now=now, error_code="llm_unavailable", error_detail=exc.message
+            )
+            return
+        wait = max(exc.retry_after_seconds or 0, _BACKOFF_BASE_SECONDS)
+        try:
+            async with db.session() as session:
+                deferred = await ExtractionQueue(session).defer(
+                    job_id=job.id,
+                    owner=job.locked_by,
+                    until=now + timedelta(seconds=wait),
+                    error_code="llm_rate_limited",
+                    error_detail=exc.message,
+                )
+        except Exception:  # noqa: BLE001 - lease expiry recovers the job
+            logger.exception("extraction_job_defer_write_failed job_id=%s", job.id)
+            return
+        logger.info(
+            "extraction_job_deferred job_id=%s reason=llm_rate_limited wait_s=%d applied=%s",
+            job.id,
+            wait,
+            deferred,
+        )
+
+    async def _mark_target_failed(self, job: ExtractionJob, *, session) -> None:  # noqa: ANN001
+        if job.source_kind is ExtractionSourceKind.DOCUMENT_CHUNK:
+            if job.target_chunk_id is not None:
+                await DocumentChunkRepository(session, user_id=job.user_id).set_extraction_status(
+                    chunk_id=job.target_chunk_id, status=ExtractionStatus.FAILED
+                )
+        elif job.target_message_id is not None and not job.extractor_version.startswith("agent:"):
+            await MessageRepository(session, user_id=job.user_id).set_extraction_status(
+                message_id=job.target_message_id, status=ExtractionStatus.FAILED
             )
 
     async def _extract(self, *, window: list[Message], target_message_id: str) -> ExtractionResult:
@@ -689,6 +848,11 @@ class ExtractionRunner:
                 evidence_score=governing.evidence_score,
             )
         except AppError as exc:
+            if is_infrastructure_error(exc):
+                # Phase 11 (J1): a Neo4j/PostgreSQL outage is not a verdict on
+                # the candidate. Propagate so the job is retried; recording it
+                # as INVALID would drop the memory permanently.
+                raise
             logger.warning(
                 "Candidate rejected by domain validation for source %s: %s",
                 source_reference,
@@ -1148,10 +1312,14 @@ async def run_worker_tick(
     state in the first place.
     """
     now = now_fn()
+    # A lease token unique to THIS claim (Phase 11, J4): several ticks may share
+    # a `worker_id` (e.g. "sweep"), and ownership checks are only meaningful
+    # if two claims can never present the same token.
+    lease_token = f"{worker_id}:{uuid.uuid4().hex[:12]}"
     async with db.session() as session:
         claimed = await ExtractionQueue(session).claim_batch(
             limit=limit,
-            worker_id=worker_id,
+            worker_id=lease_token,
             now=now,
             max_attempts=settings.extraction_max_attempts,
         )
@@ -1203,6 +1371,17 @@ async def run_sweep_tick(
             now=now,
         )
 
+    # Phase 11 (J5/J7): retry exhaustion is explicit, and an abandoned job's
+    # message/chunk leaves its non-terminal state so documents can finalize.
+    async with db.session() as session:
+        queue = ExtractionQueue(session)
+        abandoned = await queue.abandon_exhausted(
+            max_attempts=settings.extraction_max_attempts, now=now
+        )
+        failed_messages, touched_documents = await queue.fail_targets_of_abandoned_jobs()
+    for user_id, document_id in touched_documents:
+        await finalize_document(db=db, user_id=user_id, document_id=document_id, now=now)
+
     rechecked = 0
     if settings.extraction_recheck_skipped:
         async with db.session() as session:
@@ -1234,6 +1413,8 @@ async def run_sweep_tick(
     )
     return {
         "reclaimed_leases": reclaimed,
+        "abandoned_exhausted": abandoned,
+        "failed_targets": failed_messages + len(touched_documents),
         "rechecked_skipped": rechecked,
         "jobs_processed": processed,
     }

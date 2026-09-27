@@ -25,6 +25,12 @@ class LimitClass(StrEnum):
     AUTH_LOGIN_IP = "auth_login_ip"
     AUTH_LOGIN_EMAIL = "auth_login_email"
     AUTH_REGISTER = "auth_register"
+    #: Phase 11 (D5): used INSTEAD of the per-IP classes when no trustworthy
+    #: client IP exists (RATE_LIMIT_PER_IP=false): one explicit, higher,
+    #: service-wide ceiling rather than a per-IP bucket that silently becomes
+    #: shared by every user behind a proxy.
+    AUTH_LOGIN_GLOBAL = "auth_login_global"
+    AUTH_REGISTER_GLOBAL = "auth_register_global"
     GRAPH = "graph"
     SEARCH = "search"
     AGENT = "agent"
@@ -39,6 +45,8 @@ LIMITS: dict[LimitClass, tuple[str, int]] = {
     LimitClass.AUTH_LOGIN_IP: ("rate_limit_login_per_ip", 15 * 60),
     LimitClass.AUTH_LOGIN_EMAIL: ("rate_limit_login_per_email", 15 * 60),
     LimitClass.AUTH_REGISTER: ("rate_limit_register_per_ip", 60 * 60),
+    LimitClass.AUTH_LOGIN_GLOBAL: ("rate_limit_login_global", 15 * 60),
+    LimitClass.AUTH_REGISTER_GLOBAL: ("rate_limit_register_global", 60 * 60),
     LimitClass.GRAPH: ("rate_limit_graph_per_user", 60),
     LimitClass.SEARCH: ("rate_limit_search_per_user", 60),
     LimitClass.AGENT: ("rate_limit_agent_per_user", 60 * 60),

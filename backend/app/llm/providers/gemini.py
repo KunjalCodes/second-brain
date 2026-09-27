@@ -23,8 +23,15 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
 
-from app.core.errors import ConfigurationError, LLMResponseInvalidError, LLMUnavailableError
+from app.core.errors import (
+    ConfigurationError,
+    LLMRateLimitedError,
+    LLMResponseInvalidError,
+    LLMUnavailableError,
+)
 from app.llm.base import LLMResult
+from app.llm.providers._gemini_errors import is_transport_error, retry_after_seconds
+from app.llm.resilience import RetryPolicy, call_with_resilience
 
 if TYPE_CHECKING:
     from google.genai import types as genai_types
@@ -32,7 +39,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Exponential backoff base, in seconds, between immediate in-adapter retries.
-_RETRY_BACKOFF_BASE_SECONDS = 1.0
 
 #: JSON Schema keywords Pydantic emits that Gemini's `response_schema` --
 #: a restricted OpenAPI subset, not full JSON Schema -- has no field for.
@@ -179,10 +185,7 @@ class GeminiClient:
         config: genai_types.GenerateContentConfig,
         timeout: float | None,
     ) -> genai_types.GenerateContentResponse:
-        from google.genai import errors
-
-        last_error: Exception | None = None
-        for attempt in range(self._max_retries + 1):
+        async def attempt() -> genai_types.GenerateContentResponse:
             try:
                 coro = self._client.aio.models.generate_content(
                     model=self._model, contents=prompt, config=config
@@ -191,33 +194,19 @@ class GeminiClient:
                     return await asyncio.wait_for(coro, timeout=timeout)
                 return await coro
             except TimeoutError as exc:
-                last_error = LLMUnavailableError(f"Gemini did not respond within {timeout}s")
-                last_error.__cause__ = exc
-            except errors.APIError as exc:
-                mapped = _map_gemini_error(exc)
-                if not isinstance(mapped, LLMUnavailableError):
-                    # Auth/config failures are not retryable -- raise immediately.
-                    raise mapped from exc
-                last_error = mapped
-                last_error.__cause__ = exc
+                raise LLMUnavailableError(f"Gemini did not respond within {timeout}s") from exc
+            except Exception as exc:  # noqa: BLE001 - mapped into the taxonomy below
+                raise _map_gemini_error(exc) from exc
 
-            if attempt < self._max_retries:
-                backoff = _RETRY_BACKOFF_BASE_SECONDS * (2**attempt)
-                logger.warning(
-                    "Gemini call failed (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1,
-                    self._max_retries + 1,
-                    backoff,
-                    last_error,
-                )
-                await asyncio.sleep(backoff)
-
-        assert last_error is not None  # the loop always sets it before exiting
-        raise last_error
+        return await call_with_resilience(
+            "gemini", attempt, policy=RetryPolicy(max_retries=self._max_retries)
+        )
 
 
 def _map_gemini_error(exc: Exception) -> Exception:
-    """Translate a Gemini SDK exception into the application's error taxonomy."""
+    """Translate one Gemini SDK/transport failure into the application's error
+    taxonomy. Messages are safe to show a user; details stay in the chained
+    exception and the log."""
     from google.genai import errors
 
     if isinstance(exc, errors.APIError):
@@ -226,8 +215,15 @@ def _map_gemini_error(exc: Exception) -> Exception:
             return ConfigurationError(
                 "Gemini rejected the configured credentials. Check GEMINI_API_KEY."
             )
-        if code == 429 or code >= 500:
+        if code == 429:
+            return LLMRateLimitedError(
+                "Gemini is rate limiting requests (HTTP 429)",
+                retry_after_seconds=retry_after_seconds(exc),
+            )
+        if code >= 500:
             return LLMUnavailableError(f"Gemini is unavailable (HTTP {code})")
         # Any other 4xx is a request-shape problem a retry cannot fix.
         return ConfigurationError(f"Gemini rejected the request (HTTP {code})")
-    return LLMUnavailableError(f"Gemini call failed: {exc}")
+    if is_transport_error(exc):
+        return LLMUnavailableError("Gemini could not be reached")
+    return LLMUnavailableError(f"Gemini call failed ({type(exc).__name__})")

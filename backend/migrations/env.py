@@ -42,6 +42,25 @@ if _settings.database_url:
 
 target_metadata = Base.metadata
 
+#: Database objects created with RAW SQL in a migration and deliberately NOT
+#: declared on the ORM models (Phase 11, M7). Autogenerate compares the models
+#: to the live database, so without this list it proposes DROPPING these on
+#: every run -- `memory_embeddings_hnsw_cosine` (the pgvector HNSW index,
+#: created in 6202eeca7d8d) was hand-removed from five generated migrations
+#: before this guard existed. Add an object here in the same migration that
+#: creates it with `op.execute`.
+RAW_SQL_MANAGED_OBJECTS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("index", "memory_embeddings_hnsw_cosine"),
+    }
+)
+
+
+def include_object(object_, name, type_, reflected, compare_to):  # noqa: ANN001, ANN201
+    """Keep raw-SQL-managed objects out of autogenerate's comparison, so it
+    can never propose removing them."""
+    return (type_, name) not in RAW_SQL_MANAGED_OBJECTS
+
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
@@ -66,6 +85,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -73,7 +93,11 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_object=include_object,
+    )
 
     with context.begin_transaction():
         context.run_migrations()

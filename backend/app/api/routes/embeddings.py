@@ -37,6 +37,7 @@ async def trigger_backfill(
     embedding_client: EmbeddingClientDep,
     settings: SettingsDep,
     max_users: Annotated[int, Query(ge=1, le=1000)] = _DEFAULT_MAX_USERS,
+    user_offset: Annotated[int, Query(ge=0)] = 0,
 ) -> EmbeddingBackfillResult:
     """Find memories with no embedding row under the currently-configured
     `(EMBEDDING_PROVIDER, EMBEDDING_MODEL)` and embed them, for a bounded page of
@@ -49,9 +50,10 @@ async def trigger_backfill(
     graph = get_graph_client()
 
     async with db.session() as session:
-        user_ids = await UserRepository(session).list_ids(limit=max_users)
+        user_ids = await UserRepository(session).list_ids(limit=max_users, offset=user_offset)
 
     totals = {"scanned": 0, "embedded": 0, "skipped_already_present": 0, "failed": 0}
+    users_complete = 0
     for user_id in user_ids:
         counts = await run_embedding_backfill_tick(
             db=db,
@@ -62,5 +64,14 @@ async def trigger_backfill(
         )
         for key in totals:
             totals[key] += counts[key]
+        users_complete += counts["complete"]
 
-    return EmbeddingBackfillResult(users_processed=len(user_ids), **totals)
+    return EmbeddingBackfillResult(
+        users_processed=len(user_ids),
+        scanned=totals["scanned"],
+        embedded=totals["embedded"],
+        skipped_already_present=totals["skipped_already_present"],
+        failed=totals["failed"],
+        users_complete=users_complete,
+        next_user_offset=user_offset + len(user_ids) if len(user_ids) == max_users else None,
+    )

@@ -44,7 +44,7 @@ class UserRepository:
         )
         await self._session.execute(stmt)
 
-    async def list_ids(self, *, limit: int) -> list[str]:
+    async def list_ids(self, *, limit: int, offset: int = 0) -> list[str]:
         """A bounded page of every known user id, oldest first.
 
         Cross-user by design: the embedding backfill sweep (Phase 3) needs to run
@@ -53,6 +53,8 @@ class UserRepository:
         this is how the sweep's internal endpoint discovers which users to loop
         over.
         """
-        stmt = select(UserRow.id).order_by(UserRow.created_at).limit(limit)
+        stmt = (
+            select(UserRow.id).order_by(UserRow.created_at, UserRow.id).limit(limit).offset(offset)
+        )
         result = await self._session.execute(stmt)
         return [row[0] for row in result]

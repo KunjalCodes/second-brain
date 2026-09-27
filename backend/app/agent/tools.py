@@ -483,6 +483,7 @@ async def propose_memory_update(
             window_end_sequence=target_message.sequence,
             extractor_version=extractor_version,
             now=now,
+            claimed_by=f"agent-tool:{deps.id_fn()}",
         )
         # Idempotency: a retried identical proposal against a job that already
         # applied it (e.g. a repeated tool call within the loop's own retry/
@@ -518,64 +519,82 @@ async def propose_memory_update(
         now_fn=deps.now_fn,
         id_fn=deps.id_fn,
     )
-    async with deps.db.session() as session:
-        applied = await runner._apply_candidate(  # noqa: SLF001 - the reuse point PHASE5_PLAN.md section 7 designates
-            candidate,
-            target_content=target_message.content,
-            source_type=SourceType.MESSAGE,
-            source_reference=target_message.id,
-            source_location_prefix=None,
-            window_text=deps.window_text,
-            user_id=user_id,
-            memory_service=deps.memory,
-            retrieval_service=deps.retrieval,
-            merge_repo=EntityMergeCandidateRepository(session, user_id=user_id),
-            embedding_repo=EmbeddingRepository(session, user_id=user_id),
-            db=deps.db,
-            now=now,
-        )
-        candidates_repo = ExtractionCandidateRepository(session, user_id=user_id)
-        record, created = await candidates_repo.record_candidate(
-            candidate_id=deps.id_fn(),
-            extraction_job_id=job.id,
-            source_message_id=target_message.id,
-            ordinal=0,
-            payload=payload,
-            decision=applied.decision,
-            decision_reason=applied.reason,
-            confidence=candidate.confidence,
-            now=now,
-        )
-        if created and applied.memory_id is not None:
-            await candidates_repo.mark_applied(
-                candidate_id=record.id, memory_id=applied.memory_id, now=now
-            )
-        if (
-            applied.memory_id is not None
-            and applied.target_memory_id is not None
-            and applied.decision in _NEEDS_REVIEW
-        ):
-            await MemoryReviewCandidateRepository(session, user_id=user_id).record_candidate(
-                candidate_id=deps.id_fn(),
-                kind=applied.decision.value.lower(),
-                memory_id_a=applied.memory_id,
-                memory_id_b=applied.target_memory_id,
-                source_extraction_candidate_id=record.id,
-                evidence={"reason": applied.reason, "similarity": applied.evidence_score},
-                score=applied.evidence_score,
+    try:
+        async with deps.db.session() as session:
+            applied = await runner._apply_candidate(  # noqa: SLF001 - the reuse point PHASE5_PLAN.md section 7 designates
+                candidate,
+                target_content=target_message.content,
+                source_type=SourceType.MESSAGE,
+                source_reference=target_message.id,
+                source_location_prefix=None,
+                window_text=deps.window_text,
+                user_id=user_id,
+                memory_service=deps.memory,
+                retrieval_service=deps.retrieval,
+                merge_repo=EntityMergeCandidateRepository(session, user_id=user_id),
+                embedding_repo=EmbeddingRepository(session, user_id=user_id),
+                db=deps.db,
                 now=now,
             )
-        await ExtractionQueue(session).mark_done(
-            job_id=job.id,
-            provider="agent",
-            model="propose_memory_update",
-            prompt_version=extractor_version,
-            input_tokens=0,
-            output_tokens=0,
-            latency_ms=0,
-            candidate_count=1,
-            now=now,
-        )
+            candidates_repo = ExtractionCandidateRepository(session, user_id=user_id)
+            record, created = await candidates_repo.record_candidate(
+                candidate_id=deps.id_fn(),
+                extraction_job_id=job.id,
+                source_message_id=target_message.id,
+                ordinal=0,
+                payload=payload,
+                decision=applied.decision,
+                decision_reason=applied.reason,
+                confidence=candidate.confidence,
+                now=now,
+            )
+            if created and applied.memory_id is not None:
+                await candidates_repo.mark_applied(
+                    candidate_id=record.id, memory_id=applied.memory_id, now=now
+                )
+            if (
+                applied.memory_id is not None
+                and applied.target_memory_id is not None
+                and applied.decision in _NEEDS_REVIEW
+            ):
+                await MemoryReviewCandidateRepository(session, user_id=user_id).record_candidate(
+                    candidate_id=deps.id_fn(),
+                    kind=applied.decision.value.lower(),
+                    memory_id_a=applied.memory_id,
+                    memory_id_b=applied.target_memory_id,
+                    source_extraction_candidate_id=record.id,
+                    evidence={"reason": applied.reason, "similarity": applied.evidence_score},
+                    score=applied.evidence_score,
+                    now=now,
+                )
+            await ExtractionQueue(session).mark_done(
+                job_id=job.id,
+                owner=job.locked_by,
+                provider="agent",
+                model="propose_memory_update",
+                prompt_version=extractor_version,
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=0,
+                candidate_count=1,
+                now=now,
+            )
+    except Exception as exc:
+        # Phase 11: an agent-tool job is claimed at creation and processed only
+        # here. If applying fails (e.g. Neo4j unavailable), end it explicitly --
+        # otherwise its lease would expire and a background worker would run
+        # passive extraction on it. The tool call itself reports the failure.
+        async with deps.db.session() as session:
+            await ExtractionQueue(session).mark_failed(
+                job_id=job.id,
+                owner=job.locked_by,
+                error_code=getattr(exc, "code", "internal_error"),
+                error_detail="the agent's memory proposal could not be applied",
+                permanent=True,
+                next_attempt_at=None,
+                now=now,
+            )
+        raise
 
     return ToolResult(
         status=ToolStatus.REJECTED if applied.decision in _NO_OP_DECISIONS else ToolStatus.OK,

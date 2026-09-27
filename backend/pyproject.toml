@@ -38,6 +38,7 @@ asyncio_mode = "auto"
 markers = [
     "integration: requires a reachable Neo4j and/or PostgreSQL (skipped when absent)",
     "llm: calls a real LLM provider -- requires an API key and COSTS MONEY (never in default CI)",
+    "scratch_db: creates and drops throwaway PostgreSQL databases (skips if the role cannot)",
 ]
 filterwarnings = ["error::DeprecationWarning:app.*"]
 

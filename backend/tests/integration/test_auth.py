@@ -222,7 +222,11 @@ class TestRegistration:
             )
             unknown = await c.post("/auth/no-such-route", json={})
         assert disabled.status_code == unknown.status_code == 404
-        assert disabled.json() == unknown.json()
+
+        def without_request_id(body: dict) -> dict:  # each response has its own id
+            return {k: v for k, v in body["error"].items() if k != "request_id"}
+
+        assert without_request_id(disabled.json()) == without_request_id(unknown.json())
 
 
 # -- Login, cookies, tokens ------------------------------------------------------------------
@@ -1029,6 +1033,7 @@ class TestRateLimiting:
             ("GET", "/memories/search", "search"),
             ("GET", "/entities/search", "search"),
             ("POST", "/memories", "write"),
+            ("POST", "/conversations", "write"),
             ("POST", "/documents", "ingest"),
             ("POST", "/conversations/{c}/messages", "message"),
             ("POST", "/conversations/{c}/agent-turn", "agent"),
@@ -1042,8 +1047,10 @@ class TestRateLimiting:
         body validation, which is intended: invalid requests still count)."""
         async with rl.client() as c:
             _, a = await rl.user(c)
-            conv = (await c.post("/conversations", json={"title": "t"}, headers=a)).json()["id"]
-            concrete = path.replace("{c}", conv)
+            concrete = path
+            if "{c}" in path:  # POST /conversations is itself a write; only when needed
+                conv = (await c.post("/conversations", json={"title": "t"}, headers=a)).json()
+                concrete = path.replace("{c}", conv["id"])
             first = await c.request(method, concrete, headers=a, json={})
             second = await c.request(method, concrete, headers=a, json={})
         assert first.status_code != 429

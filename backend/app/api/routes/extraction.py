@@ -86,4 +86,10 @@ async def trigger_sweep(
         embedding_client=embedding_client,
         settings=settings,
     )
-    return SweepResult(**counts)
+    return SweepResult(
+        reclaimed_leases=counts["reclaimed_leases"],
+        abandoned_exhausted=counts["abandoned_exhausted"],
+        failed_targets=counts["failed_targets"],
+        rechecked_skipped=counts["rechecked_skipped"],
+        jobs_processed=counts["jobs_processed"],
+    )

@@ -95,7 +95,7 @@ def _memory(content: str, a: tuple[str, str], b: tuple[str, str], predicate: str
     return MemoryCreate.model_validate(data)
 
 
-async def seed(out: Path, hub_size: int = 0) -> int:
+async def seed(out: Path, hub_size: int = 0, perf_graph: bool = False) -> int:
     settings = get_settings()
     db = Database(settings)
     await db.connect()
@@ -202,6 +202,41 @@ async def seed(out: Path, hub_size: int = 0) -> int:
             )
             hub_id = hub_id or entity_id(hub, "Perf Hub")
 
+        # Phase 11 (M10) graph attribution fixture, sized to land exactly on
+        # 50 nodes, 150 nodes (one full server budget) and ~300 nodes /
+        # ~600 elements (the canvas cap) after one expansion -- without
+        # truncation, so each measurement is a known size.
+        perf = {}
+        if perf_graph:
+
+            async def spokes(hub: str, count: int, prefix: str) -> str:
+                first = None
+                for i in range(count):
+                    detail = await memories.create(
+                        user_id=uid,
+                        payload=_memory(
+                            f"{hub} uses {prefix} {i}.",
+                            (hub, "project"),
+                            (f"{prefix} {i}", "technology"),
+                            "uses",
+                        ),
+                    )
+                    first = first or entity_id(detail, hub)
+                return first
+
+            perf["small_hub"] = await spokes("Perf Small Hub", 49, "Small Tech")
+            perf["hub_b"] = await spokes("Perf Hub B", 149, "B Tech")
+            perf["hub_a"] = await spokes("Perf Hub A", 148, "A Tech")
+            await memories.create(
+                user_id=uid,
+                payload=_memory(
+                    "Perf Hub A depends on Perf Hub B.",
+                    ("Perf Hub A", "project"),
+                    ("Perf Hub B", "project"),
+                    "depends_on",
+                ),
+            )
+
         now = datetime.now(UTC)
         memory_candidate = str(uuid.uuid4())
         entity_candidate = str(uuid.uuid4())
@@ -236,6 +271,7 @@ async def seed(out: Path, hub_size: int = 0) -> int:
             "entities": {
                 "drawing_extractor": entity_id(paddle, "Drawing Extractor"),
                 "hub": hub_id,
+                **perf,
             },
             "review": {"memory": memory_candidate, "entity": entity_candidate},
         }
@@ -300,11 +336,12 @@ def main() -> int:
     s = sub.add_parser("seed")
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--hub-size", type=int, default=0)
+    s.add_argument("--perf-graph", action="store_true")
     t = sub.add_parser("teardown")
     t.add_argument("--state", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "seed":
-        return asyncio.run(seed(args.out, args.hub_size))
+        return asyncio.run(seed(args.out, args.hub_size, args.perf_graph))
     return asyncio.run(teardown(args.state))
 
 

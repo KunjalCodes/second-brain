@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     #: stranger's deployment -- as a credentialed origin (PHASE9_PLAN.md F7).
     cors_allow_vercel_previews: bool = False
     cors_vercel_project: str = Field(default="", pattern=r"^([a-z0-9][a-z0-9-]{0,62})?$")
+    #: Phase 11 (S7): the Vercel team/account slug that preview hostnames end
+    #: with. Required with previews; previews are refused outright in
+    #: production-like environments (a `*.vercel.app` pattern can be matched by
+    #: someone else's project name).
+    cors_vercel_team_scope: str = Field(default="", pattern=r"^([a-z0-9][a-z0-9-]{0,62})?$")
+    #: Phase 11 (D8): interactive API docs (/docs, /redoc, /openapi.json).
+    #: Empty = on in development/test, OFF in production-like environments.
+    expose_docs: bool | None = None
+    #: Phase 11 (D7): explicit opt-in to fake/offline AI providers in a
+    #: production-like environment (the staging default). Without it,
+    #: LLM_PROVIDER=fake / EMBEDDING_PROVIDER=fake refuse to start there.
+    allow_fake_ai: bool = False
+    #: Phase 11 (M5): `json` (default in production-like environments) or `text`.
+    log_format: str = Field(default="", pattern=r"^(|json|text)$")
 
     # -- Neo4j -------------------------------------------------------------
     # Required. Deliberately has no default: a silent fallback to a localhost
@@ -92,6 +106,11 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_timeout_seconds: float = Field(default=30.0, gt=0)
     llm_max_retries: int = Field(default=3, ge=0, le=10)
+    #: How long a background job may keep waiting out provider throttling
+    #: (HTTP 429 / cooldown) without spending retry attempts, measured from job
+    #: creation. Past this, throttling counts as an ordinary failed attempt so
+    #: the job still reaches a terminal state (Phase 11, section 12).
+    llm_throttle_max_age_seconds: int = Field(default=86400, ge=60, le=7 * 86400)
     gemini_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""
@@ -126,6 +145,8 @@ class Settings(BaseSettings):
     # Bounded batch size for the embedding backfill sweep -- same role as
     # EXTRACTION_SWEEP_BATCH_SIZE.
     embedding_backfill_batch_size: int = Field(default=50, ge=1, le=500)
+    #: Upper bound on memories scanned per user per backfill tick (Phase 11).
+    embedding_backfill_max_scan: int = Field(default=10000, ge=100, le=1_000_000)
 
     # -- Semantic evidence thresholds (Phase 3) -----------------------------
     # Configuration, not tuned constants baked into code -- PHASE3_PLAN.md
@@ -196,12 +217,27 @@ class Settings(BaseSettings):
     #: from user input (section 9) -- documents are keyed by a generated id.
     document_storage_dir: str = "./data/documents"
     max_document_size_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
+    #: Phase 11 (S10): cap on every non-upload request body (JSON). Uploads
+    #: are capped at MAX_DOCUMENT_SIZE_BYTES plus multipart overhead.
+    max_request_body_bytes: int = Field(default=1024 * 1024, ge=1024)
     max_document_pages: int = Field(default=200, ge=1, le=2000)
     max_chunks_per_document: int = Field(default=500, ge=1, le=5000)
     ingestion_parse_timeout_seconds: float = Field(default=60.0, gt=0)
+    #: Staging storage policy (docs/PHASE11_PLAN.md section 16): delete an
+    #: upload's raw bytes once its chunks exist. Nothing reads them afterwards
+    #: (provenance is served from PostgreSQL), and it bounds disk use on an
+    #: ephemeral filesystem. Off by default, so local behaviour is unchanged.
+    document_delete_bytes_after_ingestion: bool = False
     ingestion_sweep_batch_size: int = Field(default=20, ge=1, le=500)
     ingestion_lease_seconds: int = Field(default=600, ge=30)
     ingestion_max_attempts: int = Field(default=3, ge=1, le=10)
+
+    # -- In-process sweeper (Phase 11, app/workers/sweeper.py) ---------------
+    #: Seconds between recovery passes; 0 disables the sweeper (tests, or a
+    #: deployment that triggers the internal sweep endpoints externally).
+    sweep_interval_seconds: float = Field(default=60.0, ge=0, le=3600)
+    sweep_initial_delay_seconds: float = Field(default=5.0, ge=0, le=600)
+    sweep_shutdown_grace_seconds: float = Field(default=15.0, ge=0, le=120)
     #: Chunking (PHASE6_PLAN.md section 6) -- tunable, not a magic number,
     #: same convention as EXTRACTION_WINDOW_SIZE.
     document_chunk_size_chars: int = Field(default=2000, ge=200, le=20_000)
@@ -303,6 +339,16 @@ class Settings(BaseSettings):
     rate_limit_login_per_ip: int = Field(default=10, ge=1, le=10_000)  # / 15 min
     rate_limit_login_per_email: int = Field(default=5, ge=1, le=10_000)  # / 15 min
     rate_limit_register_per_ip: int = Field(default=5, ge=1, le=10_000)  # / hour
+    #: Phase 11 (D5). True only when `client_ip()` sees the REAL client
+    #: address (direct connection, or a proxy chain in TRUSTED_PROXY_IPS that
+    #: is known to overwrite X-Forwarded-For). Behind the Next.js rewrite /
+    #: a platform load balancer it sees the proxy, so per-IP buckets would be
+    #: one bucket shared by every user; set false there and the explicit
+    #: global ceilings below apply instead. Per-email and per-user limits are
+    #: unaffected either way.
+    rate_limit_per_ip: bool = True
+    rate_limit_login_global: int = Field(default=300, ge=1, le=100_000)  # / 15 min
+    rate_limit_register_global: int = Field(default=50, ge=1, le=100_000)  # / hour
     rate_limit_graph_per_user: int = Field(default=120, ge=1, le=100_000)  # / minute
     rate_limit_search_per_user: int = Field(default=120, ge=1, le=100_000)  # / minute
     rate_limit_agent_per_user: int = Field(default=30, ge=1, le=100_000)  # / hour
@@ -328,6 +374,11 @@ class Settings(BaseSettings):
         environment-dependent default rather than failing to parse."""
         return None if isinstance(v, str) and not v.strip() else v
 
+    @field_validator("expose_docs", mode="before")
+    @classmethod
+    def _empty_docs_means_unset(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
+
     @field_validator("trusted_proxy_ips")
     @classmethod
     def _valid_proxy_networks(cls, v: str) -> str:
@@ -347,10 +398,13 @@ class Settings(BaseSettings):
                     "AUTH_MODE and ALLOW_USER_ID_HEADER contradict each other; set only "
                     "AUTH_MODE (ALLOW_USER_ID_HEADER is a deprecated alias)."
                 )
-        if self.cors_allow_vercel_previews and not self.cors_vercel_project:
+        if self.cors_allow_vercel_previews and not (
+            self.cors_vercel_project and self.cors_vercel_team_scope
+        ):
             raise ValueError(
-                "CORS_ALLOW_VERCEL_PREVIEWS=true requires CORS_VERCEL_PROJECT=<project slug>: "
-                "admitting every *.vercel.app site as a credentialed origin is unsafe."
+                "CORS_ALLOW_VERCEL_PREVIEWS=true requires CORS_VERCEL_PROJECT=<project slug> and "
+                "CORS_VERCEL_TEAM_SCOPE=<team slug>: admitting every *.vercel.app site as a "
+                "credentialed origin is unsafe."
             )
         if self.is_production_like:
             # Fail loudly rather than silently shipping a trust-the-client identity
@@ -376,6 +430,7 @@ class Settings(BaseSettings):
                     f"AUTH_SCRYPT_N/R/P are below the OWASP floor when {env} "
                     "(need N>=2^15, r>=8 and N*r*p >= 2^15*8*3)."
                 )
+            self._check_deployment_requirements(env)
         if 128 * self.auth_scrypt_n * self.auth_scrypt_r * 2 > self.auth_scrypt_maxmem:
             raise ValueError("AUTH_SCRYPT_MAXMEM is too small for AUTH_SCRYPT_N/R.")
         if self.llm_provider not in _KNOWN_PROVIDERS:
@@ -388,6 +443,77 @@ class Settings(BaseSettings):
                 f"got {self.embedding_provider!r}"
             )
         return self
+
+    def _check_deployment_requirements(self, env: str) -> None:
+        """Phase 11 (M4, docs/PHASE11_PLAN.md section 23): refuse to start a
+        production-like process on insecure or broken development defaults,
+        instead of discovering them at the first request or job."""
+        problems: list[str] = []
+        if not self.database_url:
+            problems.append("DATABASE_URL must be set")
+        if not self.neo4j_configured:
+            problems.append("NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD must be set")
+        if len(self.internal_api_token) < 32:
+            problems.append(
+                "INTERNAL_API_TOKEN must be set to a random value of at least 32 characters"
+            )
+        fake = [
+            name
+            for name, provider in (
+                ("LLM_PROVIDER", self.llm_provider),
+                ("EMBEDDING_PROVIDER", self.embedding_provider),
+            )
+            if provider == "fake"
+        ]
+        if fake and not self.allow_fake_ai:
+            problems.append(
+                f"{' and '.join(fake)}=fake: set ALLOW_FAKE_AI=true to run with the offline "
+                "providers deliberately (e.g. staging), or configure a real provider"
+            )
+        if self.llm_provider not in {"fake", "gemini"}:
+            problems.append(f"LLM_PROVIDER={self.llm_provider!r} has no adapter yet")
+        if self.llm_provider == "gemini" and not (self.gemini_api_key and self.llm_model):
+            problems.append("LLM_PROVIDER=gemini requires GEMINI_API_KEY and LLM_MODEL")
+        if self.embedding_provider == "gemini" and not (
+            self.embedding_api_key and self.embedding_model
+        ):
+            problems.append("EMBEDDING_PROVIDER=gemini requires an API key and EMBEDDING_MODEL")
+        if not self.document_storage_dir.startswith("/"):
+            problems.append(
+                "DOCUMENT_STORAGE_DIR must be an absolute path (a relative path depends on "
+                "the working directory the host happens to use)"
+            )
+        if self.debug:
+            problems.append("DEBUG must be false")
+        if self.database_echo:
+            problems.append("DATABASE_ECHO must be false (it logs every SQL statement)")
+        if self.log_level == "DEBUG":
+            problems.append("LOG_LEVEL must not be DEBUG")
+        if self.cors_allow_vercel_previews:
+            problems.append(
+                "CORS_ALLOW_VERCEL_PREVIEWS must be false: preview hostnames cannot be "
+                "distinguished from other people's Vercel projects by pattern"
+            )
+        for origin in self.allowed_origins:
+            host = origin.split("://", 1)[-1].split(":", 1)[0]
+            if not origin.startswith("https://") and host not in {"localhost", "127.0.0.1"}:
+                problems.append(f"browser origin {origin!r} must use https://")
+        if problems:
+            raise ValueError(
+                f"Refusing to start with {env}:\n  - " + "\n  - ".join(problems)
+            )
+
+    @property
+    def docs_enabled(self) -> bool:
+        if self.expose_docs is not None:
+            return self.expose_docs
+        return not self.is_production_like
+
+    @property
+    def effective_log_format(self) -> str:
+        if self.log_format:
+            return self.log_format
+        return "json" if self.is_production_like else "text"
 
     @property
     def allowed_origins(self) -> list[str]:
@@ -404,9 +530,18 @@ class Settings(BaseSettings):
     def allowed_origin_regex(self) -> str | None:
         """Regex allowing ONE Vercel project's preview deployments (generated
         hostnames `<project>-<hash>-<scope>.vercel.app`). Never all of vercel.app."""
-        if not self.cors_allow_vercel_previews or not self.cors_vercel_project:
+        if not (
+            self.cors_allow_vercel_previews
+            and self.cors_vercel_project
+            and self.cors_vercel_team_scope
+        ):
             return None
-        return rf"https://{self.cors_vercel_project}(-[a-z0-9-]+)?\.vercel\.app"
+        project, scope = self.cors_vercel_project, self.cors_vercel_team_scope
+        # Only Vercel's two preview shapes, both ending in THIS team's scope:
+        #   <project>-<9-char hash>-<scope>.vercel.app
+        #   <project>-git-<branch>-<scope>.vercel.app
+        # (Development only -- production-like environments refuse previews.)
+        return rf"https://{project}-(?:[a-z0-9]{{9}}|git-[a-z0-9-]+)-{scope}\.vercel\.app"
 
     # -- Phase 9 derived identity/security settings ---------------------------
 

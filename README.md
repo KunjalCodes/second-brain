@@ -508,7 +508,7 @@ ai-second-brain/
 │   ├── EVALUATION.md
 │   ├── API.md                   data model, graph schema, extraction pipeline, endpoints
 │   ├── PHASE2_PLAN.md .. PHASE10_PLAN.md  per-phase design + implementation status
-│   └── adr/                     architecture decision records (0001-0030)
+│   └── adr/                     architecture decision records (0001-0032)
 │
 ├── scripts/
 │   ├── init_graph.py            apply Neo4j constraints and indexes
@@ -568,6 +568,12 @@ Authentication + productionization.
 Memory Explorer UI (implemented, verified locally). Free-tier demo deployment
 documented (ADR 0030), not performed.
 
+
+## Phase 11
+
+Production hardening & deployment readiness (implemented and verified
+locally; private staging prepared, not deployed; not production-ready).
+
 ---
 
 # 🎯 Project Goal
@@ -598,7 +604,7 @@ The project explores:
 
 # 📌 Status
 
-**Phase 10 implemented locally: the Memory Explorer UI (Next.js), a presentation layer over the Phase 8 graph API and Phase 9 session auth. It is verified against a local stack and not deployed.**
+**Phase 11 implemented locally: production hardening for a private staging deployment. That covers job correctness and automatic recovery, LLM resilience, startup guards, structured logs and metrics, bounded uploads, migration safety, a proven backup/restore, and live failure drills. Staging is prepared but not deployed (provider accounts required), and the system is NOT production-ready.**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -612,8 +618,9 @@ The project explores:
 | 8 | Memory graph exploration API: `/graph/overview`, `/graph/entities/{id}/neighborhood`, `/graph/edges/evidence`, `/graph/memories/{id}/timeline` — one `GraphSlice` shape, server-side budgets with exact truncation flags, current-by-default temporal scope, merge-aware, user-isolated; measured caps on the existing `/entities/{id}/graph` | ✅ Implemented — see `docs/PHASE8_PLAN.md` section 25 for measured results and known limitations |
 | 9 | Authentication & productization foundation: email/password accounts, opaque server-side sessions (HttpOnly cookie or Bearer), logout/logout-all/password change, CSRF Origin check and narrowed CORS, PostgreSQL rate limiting, production startup guards, operator CLI for legacy ids | ✅ Implemented — see `docs/PHASE9_PLAN.md` section 24 for measured results and known limitations |
 | 10 | Memory Explorer UI: session-cookie auth through a same-origin proxy; memories, entities, time lens (valid vs recorded time), provenance, Cytoscape graph with visible truncation, ranked search, documents, review decisions, optional Ask page; authenticated responses made `no-store` (G2); inert rendering of all content | ✅ Implemented and verified locally (unit, component, E2E, a11y). The demo deployment (optional M10) is documented only, not deployed. See `docs/PHASE10_PLAN.md` section 29 |
+| 11 | Production hardening & deployment readiness: lease-owned jobs with retryable infrastructure failures and explicit terminal states, in-process sweeper, provider-aware LLM retries (Retry-After, cooldown, throttling doesn't spend attempts), opt-in real-LLM evaluations, production startup guards, code-only readiness with migration check, no internals in errors, JSON logs + `/internal/metrics`, bounded uploads, HNSW-safe migrations, encrypted backups with a verified restore drill, live failure drills, CI secret scan + dependency audit | ✅ Implemented and verified locally. Staging deployment prepared (`docs/DEPLOYMENT.md`, `render.yaml`) but **not performed**. See `docs/PHASE11_PLAN.md` section 31 |
 
-Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE10_PLAN.md` section 29) rather than duplicated here, since they change with every phase.
+Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE11_PLAN.md` section 31) rather than duplicated here, since they change with every phase.
 
 Phase 1 deliberately contains **no LLM, no embeddings, no agent, no document
 ingestion and no authentication**, so the graph-memory core could be verified on

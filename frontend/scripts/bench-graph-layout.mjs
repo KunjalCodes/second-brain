@@ -1,5 +1,5 @@
 /**
- * Headless Cytoscape layout cost for synthetic graphs of 150 / 400 / 600
+ * Headless Cytoscape layout cost for synthetic graphs of 100 / 300 / 600 / 1200
  * elements (the canvas cap), using the same first-render layout options as
  * components/graph/CytoscapeCanvas.tsx. Measures layout computation only --
  * no painting, and Node rather than a browser -- so it bounds the CPU cost of
@@ -27,7 +27,7 @@ function synthetic(elementCount) {
 }
 
 const results = {};
-for (const size of [150, 400, 600]) {
+for (const size of [100, 300, 600, 1200]) {
   const times = [];
   for (let t = 0; t < TRIALS; t++) {
     const cy = cytoscape({ headless: true, styleEnabled: true, elements: synthetic(size) });

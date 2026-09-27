@@ -288,12 +288,14 @@ RETURN m.id AS id
 #: a newly-created memory already gets embedded synchronously right after
 #: extraction, or via a background task on the direct-create route, so the
 #: backfill's job is primarily historical (pre-Phase-3) memories and anything a
-#: live embed attempt failed for -- oldest-first makes steady forward progress
-#: across repeated ticks rather than re-scanning the same recent memories.
+#: live embed attempt failed for. Keyset-paginated by id (Phase 11, J11): the
+#: previous oldest-first `LIMIT` re-scanned the same first page on every tick,
+#: so memories beyond it were never reached.
 LIST_MEMORIES_FOR_BACKFILL = """
 MATCH (m:Memory {user_id: $user_id})
+WHERE $after_id IS NULL OR m.id > $after_id
 RETURN m.id AS id, m.content AS content
-ORDER BY m.created_at ASC, m.id ASC
+ORDER BY m.id ASC
 LIMIT $limit
 """
 
@@ -513,7 +515,9 @@ class MemoryRepository:
         rows = await self._client.read(query, {"user_id": user_id, **params})
         return int(rows[0]["total"]) if rows else 0
 
-    async def list_for_backfill(self, *, user_id: str, limit: int) -> list[dict[str, str]]:
+    async def list_for_backfill(
+        self, *, user_id: str, limit: int, after_id: str | None = None
+    ) -> list[dict[str, str]]:
         """A bounded, oldest-first page of `{id, content}` for the embedding
         backfill sweep (`app.semantic.embedding_pipeline`). Deliberately returns
         raw dicts, not `Memory` domain objects -- the backfill needs exactly two
@@ -522,7 +526,7 @@ class MemoryRepository:
         time, never baked into what gets embedded).
         """
         rows = await self._client.read(
-            LIST_MEMORIES_FOR_BACKFILL, {"user_id": user_id, "limit": limit}
+            LIST_MEMORIES_FOR_BACKFILL, {"user_id": user_id, "limit": limit, "after_id": after_id}
         )
         return [{"id": r["id"], "content": r["content"]} for r in rows]
 

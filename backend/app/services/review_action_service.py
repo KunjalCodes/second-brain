@@ -223,6 +223,23 @@ class ReviewActionService:
             )
         else:
             self._require_idempotent_or_conflict(row, "conflict_resolved")
+            # Phase 11 (M8): "conflict_resolved" alone does not say HOW it was
+            # resolved. A repeat is only idempotent if it asks for the same
+            # resolution (and winner) that was recorded; a different one
+            # contradicts the recorded decision -> 409, as the module contract
+            # says. Found by the populated contract test.
+            history = await ReviewAuditRepository(self._session, user_id=user_id).list_for_target(
+                target_type="memory_review_candidate", target_id=candidate_id
+            )
+            recorded = history[-1]["resulting_state"] if history else {}
+            if recorded.get("resolution") not in (None, resolution) or (
+                resolution == "supersede"
+                and recorded.get("winner_memory_id") not in (None, winner_memory_id)
+            ):
+                raise ConflictError(
+                    "This conflict was already resolved differently",
+                    details={"recorded_resolution": recorded.get("resolution")},
+                )
 
         return await self._reviews.get_memory_candidate(user_id=user_id, candidate_id=candidate_id)
 

@@ -528,7 +528,8 @@ export interface paths {
         };
         /**
          * Readiness
-         * @description Report dependency health without raising, so the body always explains why.
+         * @description Report dependency health without raising, so the body always says which
+         *     dependency is the problem -- as a code, never as internal detail.
          */
         get: operations["readiness_health_ready_get"];
         put?: never;
@@ -581,6 +582,23 @@ export interface paths {
          *     for the local equivalent.
          */
         post: operations["trigger_sweep_internal_extraction_sweep_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operational metrics (internal; requires X-Internal-Token) */
+        get: operations["get_metrics_internal_metrics_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1198,10 +1216,14 @@ export interface components {
             embedded: number;
             /** Failed */
             failed: number;
+            /** Next User Offset */
+            next_user_offset: number | null;
             /** Scanned */
             scanned: number;
             /** Skipped Already Present */
             skipped_already_present: number;
+            /** Users Complete */
+            users_complete: number;
             /** Users Processed */
             users_processed: number;
         };
@@ -2311,6 +2333,10 @@ export interface components {
          * @description Counts from one sweep tick (docs/adr/0008) -- observability, not an audit log.
          */
         SweepResult: {
+            /** Abandoned Exhausted */
+            abandoned_exhausted: number;
+            /** Failed Targets */
+            failed_targets: number;
             /** Jobs Processed */
             jobs_processed: number;
             /** Rechecked Skipped */
@@ -3358,6 +3384,7 @@ export interface operations {
         parameters: {
             query?: {
                 max_users?: number;
+                user_offset?: number;
             };
             header?: {
                 "X-Internal-Token"?: string | null;
@@ -3405,6 +3432,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SweepResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metrics_internal_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Internal-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

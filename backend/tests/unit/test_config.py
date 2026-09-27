@@ -46,8 +46,16 @@ class TestCorsOrigins:
     def test_vercel_previews_require_a_named_project(self) -> None:
         with pytest.raises(PydanticValidationError, match="CORS_VERCEL_PROJECT"):
             _settings(cors_allow_vercel_previews=True)
-        s = _settings(cors_allow_vercel_previews=True, cors_vercel_project="brain")
-        assert s.allowed_origin_regex == r"https://brain(-[a-z0-9-]+)?\.vercel\.app"
+        with pytest.raises(PydanticValidationError, match="CORS_VERCEL_TEAM_SCOPE"):
+            _settings(cors_allow_vercel_previews=True, cors_vercel_project="brain")
+        s = _settings(
+            cors_allow_vercel_previews=True,
+            cors_vercel_project="brain",
+            cors_vercel_team_scope="me",
+        )
+        assert s.allowed_origin_regex == (
+            r"https://brain-(?:[a-z0-9]{9}|git-[a-z0-9-]+)-me\.vercel\.app"
+        )
 
     def test_vercel_preview_regex_can_be_disabled(self) -> None:
         assert _settings(cors_allow_vercel_previews=False).allowed_origin_regex is None
@@ -95,6 +103,9 @@ class TestProductionGuards:
             frontend_url="https://brain.example.com",
             auth_scrypt_n=2**15,
             auth_scrypt_p=3,
+            internal_api_token="t" * 40,
+            allow_fake_ai=True,
+            document_storage_dir="/srv/documents",
         )
         assert s.app_env == "production"
 

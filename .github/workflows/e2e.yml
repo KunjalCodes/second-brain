@@ -1,0 +1,68 @@
+# Playwright end-to-end suite -- MANUAL ONLY (Phase 11, D11).
+#
+# Needs a real stack: a DEDICATED TEST Neo4j + PostgreSQL (the same secrets
+# as integration.yml). The backend runs in session mode with fake/offline AI;
+# the frontend is a production build (strict CSP). The suite seeds and deletes
+# its own throwaway accounts (scripts/e2e_seed.py).
+name: E2E (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      NEO4J_URI: ${{ secrets.NEO4J_URI }}
+      NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
+      NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      APP_ENV: development
+      AUTH_MODE: session
+      ALLOW_USER_ID_HEADER: "false"
+      FRONTEND_URL: http://localhost:3100
+      LLM_PROVIDER: fake
+      EMBEDDING_PROVIDER: fake
+      RATE_LIMIT_LOGIN_PER_IP: "1000"
+      RATE_LIMIT_LOGIN_PER_EMAIL: "1000"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require test database secrets
+        run: |
+          if [ -z "$NEO4J_URI" ] || [ -z "$DATABASE_URL" ]; then
+            echo "::error::NEO4J_* and DATABASE_URL secrets (dedicated TEST instances) are required"; exit 1
+          fi
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: |
+          (cd backend && uv sync --extra dev)
+          (cd frontend && npm ci && npx playwright install --with-deps chromium-headless-shell)
+      - name: Schema
+        working-directory: backend
+        run: |
+          uv run alembic upgrade head
+          uv run python ../scripts/init_graph.py
+      - name: Start backend
+        working-directory: backend
+        run: |
+          nohup uv run uvicorn app.main:app --port 8010 --no-access-log > /tmp/backend.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8010/health >/dev/null && break; sleep 1; done
+      - name: Build and start frontend
+        working-directory: frontend
+        env:
+          BACKEND_ORIGIN: http://localhost:8010
+        run: |
+          npm run build
+          nohup npx next start --port 3100 > /tmp/frontend.log 2>&1 &
+          for i in $(seq 1 30); do curl -s -o /dev/null localhost:3100/login && break; sleep 1; done
+      - name: Playwright
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: Logs on failure
+        if: failure()
+        run: tail -n 200 /tmp/backend.log /tmp/frontend.log

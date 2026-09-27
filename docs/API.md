@@ -480,6 +480,51 @@ Consequences:
   limiting then sees the proxy's address, so it acts as a shared bucket;
   per-email and per-user limits are unaffected.
 
+## Operations (Phase 11)
+
+- **Request ids.** `X-Request-ID` on every response is server-generated. A
+  well-formed client `X-Request-ID` (`[A-Za-z0-9._-]{1,64}`) is never canonical;
+  it is echoed as `X-Client-Request-ID` and logged as `client_request_id`.
+- **`Server-Timing: app;dur=<ms>`** on every response: server processing time, so
+  clients can separate backend time from network time.
+- **Security headers** on every response: `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`.
+  `Strict-Transport-Security` is added in production-like environments only.
+- **Body limits.** A declared `Content-Length` over the limit is refused with 413
+  before parsing. A streamed body is cut off as soon as it passes the limit.
+  Uploads are also read in bounded chunks.
+- **Structured logs** (`LOG_FORMAT=json`): one access line per request with the
+  route **template**, never the raw path or query string. `request_id`,
+  `user_id` and `job_id` are attached to every record. Library loggers that
+  record query text or URLs (Neo4j driver, SQLAlchemy engine, httpx) are pinned
+  to WARNING.
+- **`GET /internal/metrics`** (`X-Internal-Token`), JSON:
+  - requests by route template and status class, latency histograms (all /
+    graph / retrieval / agent / auth), error and 429 counts, auth failures;
+  - queue gauges from PostgreSQL: depth by status, oldest pending age, abandoned
+    in the last 24 h, stuck documents, active sessions;
+  - LLM provider health: calls, errors by kind, cooldown;
+  - the sweeper's last pass.
+
+  Counters reset on restart.
+- **Background jobs.** States are `pending` → `in_progress` (leased) → `done`;
+  `failed` means retryable, with `next_attempt_at`; `abandoned` is terminal,
+  with `error_code`, `error_detail`, `attempts` and `completed_at`.
+  - Completion writes are conditional on the claim's lease token (`locked_by`),
+    so a stale worker cannot overwrite a newer owner.
+  - Neo4j/PostgreSQL outages make a job retryable, never an `INVALID` candidate.
+  - Provider throttling does not spend attempts, for up to
+    `LLM_THROTTLE_MAX_AGE_SECONDS`.
+  - The last failed attempt is terminal immediately, and the message or chunk is
+    marked `failed` so its document finalizes.
+- **Sweeper.** An in-process loop (`SWEEP_INTERVAL_SECONDS`, default 60 s)
+  runs the extraction sweep, the ingestion sweep and dead-session cleanup,
+  under a PostgreSQL advisory lock so only one instance sweeps at a time.
+  `POST /internal/extraction/sweep` remains for external triggering.
+- **`POST /internal/embeddings/backfill`** now pages through all of a user's
+  memories (keyset by id) and takes `user_offset`. The response adds
+  `users_complete` and `next_user_offset`.
+
 ---
 
 # 4. Endpoints
@@ -582,11 +627,19 @@ GET /entities/{id}/history?as_of=2026-03-01T00:00:00Z
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | **Liveness.** Never touches the database. |
-| `GET` | `/health/ready` | **Readiness.** `503` when Neo4j is unreachable. |
+| `GET` | `/health` | **Liveness** ("is the process running?"). Never touches a database. `{"status":"ok","version":"0.11.0"}` |
+| `GET` | `/health/ready` | **Readiness** ("can this instance serve normal requests?"). `200 {"status":"ready","checks":{"neo4j":"ok","postgresql":"ok","migrations":"ok"}}`, otherwise `503` with `"unavailable"` / `"not_configured"` / `"mismatch"` per check |
 
-Split deliberately: a graph outage must not make the platform kill and restart a
-healthy process.
+Split deliberately: a database outage must not make the platform kill and
+restart a healthy process. Phase 11 changes to readiness:
+- `migrations` compares `alembic_version` with the head the code ships
+  (cached 60 s), so a deploy that skipped `alembic upgrade head` is not routed
+  traffic;
+- Neo4j reconnects when its driver was never created;
+- bodies are **codes only**, never exception text (the endpoint is
+  unauthenticated).
+
+The LLM provider is deliberately not checked.
 
 ## Errors
 
@@ -614,8 +667,19 @@ Every error has a stable machine-readable `code`:
 | `graph_query_error` | 500 | Query failed; details logged, not returned |
 | `database_unavailable` | 503 | PostgreSQL unreachable |
 | `database_error` | 500 | SQL query failed; details logged, not returned |
-| `configuration_error` | 500 | Missing or invalid configuration |
+| `configuration_error` | 500 | Missing or invalid configuration. Phase 11: the message returned is generic; the specific one is logged |
+| `llm_unavailable` / `llm_rate_limited` | 503 | Agent turn only: the provider is down or throttling. `Retry-After` is sent when the provider gave a hint |
+| `request_too_large` | 413 | Body over `MAX_REQUEST_BODY_BYTES` (JSON) or the upload limit, refused before parsing |
+| `method_not_allowed` | 405 | Framework error, in the same envelope since Phase 11 |
 | `internal_error` | 500 | Unexpected; traceback logged against `request_id` |
+
+Phase 11 rules for every error body:
+- 5xx responses never include `details`, which can carry driver or OS text such
+  as file paths;
+- no body contains stack traces, SQL, Cypher, file paths, hostnames or
+  credential names (pinned by `tests/unit/test_error_leaks.py`);
+- framework errors (unknown route 404, 405) use this envelope instead of
+  FastAPI's `{"detail": …}`.
 
 `llm_unavailable` and `llm_response_invalid` are recorded on `extraction_jobs.error_code`
 (visible via `GET /extraction/jobs/{id}`), not raised as HTTP errors — an LLM
@@ -1403,5 +1467,31 @@ No new backend variables. The frontend has two, in `frontend/.env.example`:
 
 For the UI, set the backend's `FRONTEND_URL` to the UI origin.
 
-`REDIS_URL` and `STORAGE_*` are present in `.env.example` for later phases and are
-**unused through Phase 4**.
+## Phase 11 additions
+
+Documented in `.env.example` (Phase 11 section) and `docs/DEPLOYMENT.md`:
+
+| Variables | Purpose |
+|---|---|
+| `ALLOW_FAKE_AI` | Explicit opt-in to offline providers when production-like |
+| `EXPOSE_DOCS` | Interactive docs; default off when production-like |
+| `LOG_FORMAT` | `json` / `text` |
+| `SWEEP_*` | Sweeper interval, initial delay, shutdown grace |
+| `MAX_REQUEST_BODY_BYTES` | Cap on non-upload bodies |
+| `DOCUMENT_DELETE_BYTES_AFTER_INGESTION` | Staging storage policy |
+| `LLM_THROTTLE_MAX_AGE_SECONDS` | How long throttling may defer a job without spending attempts |
+| `RATE_LIMIT_PER_IP`, `RATE_LIMIT_LOGIN_GLOBAL`, `RATE_LIMIT_REGISTER_GLOBAL` | D5 client-IP handling |
+| `CORS_VERCEL_TEAM_SCOPE` | Required with Vercel previews |
+| `EMBEDDING_BACKFILL_MAX_SCAN` | Backfill scan bound per user per tick |
+
+Production-like startup now also **requires**:
+- `DATABASE_URL` and `NEO4J_*`;
+- an `INTERNAL_API_TOKEN` of at least 32 characters;
+- an absolute `DOCUMENT_STORAGE_DIR`;
+- `DEBUG` and `DATABASE_ECHO` false, and `LOG_LEVEL` not DEBUG;
+- `https://` browser origins;
+- previews off;
+- an implemented, keyed LLM provider, or `ALLOW_FAKE_AI=true`.
+
+`REDIS_URL` and `STORAGE_*` were removed from `.env.example`: they were never
+read.

@@ -178,7 +178,22 @@ class ReviewService:
         rows = await repo.list_recent(limit=limit, offset=offset)
         total = await repo.count()
         return ReviewAuditLogResponse(
-            items=[ReviewAuditLogEntry(**row) for row in rows],
+            # Explicit mapping (Phase 11, M8): spreading repository rows into
+            # this extra="forbid" model turns any future column into a 500.
+            items=[
+                ReviewAuditLogEntry(
+                    id=row["id"],
+                    action=row["action"],
+                    target_type=row["target_type"],
+                    target_id=row["target_id"],
+                    previous_state=row["previous_state"],
+                    resulting_state=row["resulting_state"],
+                    reason=row["reason"],
+                    reviewer_id=row["reviewer_id"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ],
             total=total,
             limit=limit,
             offset=offset,

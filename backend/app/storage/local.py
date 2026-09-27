@@ -13,6 +13,7 @@ is ever used to build a path, as defense in depth on top of the existing
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from pathlib import Path
@@ -37,6 +38,11 @@ def _validate_user_id(user_id: str) -> str:
             details={"user_id_length": len(user_id)},
         )
     return user_id
+
+
+def _write(user_dir: Path, key: str, data: bytes) -> None:
+    user_dir.mkdir(parents=True, exist_ok=True)
+    (user_dir / key).write_bytes(data)
 
 
 class LocalDocumentStorage:
@@ -64,9 +70,10 @@ class LocalDocumentStorage:
     async def put(self, *, data: bytes, user_id: str) -> StoragePutResult:
         try:
             user_dir = self._user_dir(user_id)
-            user_dir.mkdir(parents=True, exist_ok=True)
             key = str(uuid.uuid4())
-            (user_dir / key).write_bytes(data)
+            # Blocking file I/O runs on a worker thread, not the event loop
+            # (Phase 11, S12): a slow disk must not stall every request.
+            await asyncio.to_thread(_write, user_dir, key, data)
         except OSError as exc:
             raise StorageUnavailableError(
                 "Could not write to local document storage", details={"reason": str(exc)}
@@ -76,7 +83,7 @@ class LocalDocumentStorage:
     async def get(self, *, storage_key: str, user_id: str) -> bytes:
         path = self._path_for(user_id=user_id, storage_key=storage_key)
         try:
-            return path.read_bytes()
+            return await asyncio.to_thread(path.read_bytes)
         except FileNotFoundError as exc:
             raise NotFoundError("No such document storage object") from exc
         except OSError as exc:
@@ -87,7 +94,7 @@ class LocalDocumentStorage:
     async def delete(self, *, storage_key: str, user_id: str) -> None:
         path = self._path_for(user_id=user_id, storage_key=storage_key)
         try:
-            path.unlink(missing_ok=True)
+            await asyncio.to_thread(path.unlink, missing_ok=True)
         except OSError as exc:
             raise StorageUnavailableError(
                 "Could not delete from local document storage", details={"reason": str(exc)}

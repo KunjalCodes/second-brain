@@ -123,9 +123,32 @@ What the suite covers:
 Performance measurements, which are not pass/fail:
 
 ```bash
-E2E_PERF=1 E2E_HUB_SIZE=200 npx playwright test e2e/perf.spec.ts   # → test-results/perf.json
-node scripts/bench-graph-layout.mjs                                # headless layout cost
+E2E_PERF=1 E2E_HUB_SIZE=200 E2E_PERF_GRAPH=1 npx playwright test e2e/perf.spec.ts   # → test-results/perf.json
+node scripts/bench-graph-layout.mjs                                                 # headless layout cost
+NEXT_SOURCEMAPS=1 BACKEND_ORIGIN=http://localhost:8000 npx next build               # then:
+node scripts/bundle-attribution.mjs <chunk files…>                                  # bytes per source module
 ```
+
+Page-weight figures are split at the `load` event:
+- `critical_transferred_bytes`: JS needed to render the page;
+- `prefetch_transferred_bytes`: Next.js prefetching the routes linked from the
+  navigation, at idle time.
+
+Phase 10's 190.9 KB figure mixed the two. Measured on the same metric (Phase 11):
+
+| Build | Critical JS | Prefetch |
+|---|---|---|
+| `a9da2db` | 160.1 KB | 33.7 KB |
+| After Phase 11 | 168.5 KB | 33.8 KB |
+
+The +8.4 KB is mostly the error boundaries (~4.8 KB). Both builds are within the
+180 KB budget. `E2E_PERF_GRAPH=1` seeds hubs for the graph attribution test
+(backend / network / layout / paint at ~50 / ~150 / ~300 nodes).
+
+**Uploads through the proxy.** Next.js buffers proxied bodies.
+`experimental.proxyClientMaxBodySize` in `next.config.ts` must stay equal to the
+backend upload limit (`MAX_DOCUMENT_SIZE_BYTES` + 64 KiB). Its default (10 MB)
+silently truncated 20 MiB uploads (measured).
 
 `E2E_KEEP_DATA=1` keeps the seeded data after a run. The next run removes it
 first.

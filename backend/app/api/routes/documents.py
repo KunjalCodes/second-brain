@@ -27,6 +27,7 @@ from app.api.deps import (
     SettingsDep,
 )
 from app.core.config import Settings
+from app.core.errors import ValidationError
 from app.db.engine import get_database
 from app.documents.ingestion import run_ingestion_worker_tick
 from app.embeddings.base import EmbeddingClient
@@ -100,6 +101,26 @@ async def _background_ingest_and_extract(
         logger.exception("Background extraction tick failed")
 
 
+_READ_CHUNK_BYTES = 256 * 1024
+
+
+async def _read_bounded(file: UploadFile, *, limit: int) -> bytes:
+    """Read the upload in chunks, refusing it as soon as it passes `limit`
+    (Phase 11, S10) -- the whole file is never loaded just to find out it is
+    too large. One byte past the limit is enough to know."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(_READ_CHUNK_BYTES):
+        total += len(chunk)
+        if total > limit:
+            raise ValidationError(
+                f"The uploaded file exceeds the limit of {limit} bytes",
+                details={"error_code": "file_too_large"},
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post(
     "",
     dependencies=[RATE_LIMIT_INGEST],
@@ -118,7 +139,7 @@ async def upload_document(
     settings: SettingsDep,
     file: Annotated[UploadFile, File()],
 ) -> DocumentResponse:
-    content = await file.read()
+    content = await _read_bounded(file, limit=settings.max_document_size_bytes)
     document, is_new = await service.upload_document(
         user_id=user_id, filename=file.filename or "untitled", content=content
     )
