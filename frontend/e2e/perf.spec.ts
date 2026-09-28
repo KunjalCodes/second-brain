@@ -172,6 +172,9 @@ test.afterAll(() => {
  * frames after layout (data-paint-ms). Run with E2E_PERF_GRAPH=1.
  */
 test("graph attribution: backend vs network vs layout vs paint", async ({ page }) => {
+  // 3 sizes x 3 trials, the largest with a ~1.5 s layout: ~25 s measured,
+  // too close to the 30 s default to be a reliable measurement run.
+  test.setTimeout(120_000);
   const s = seed() as ReturnType<typeof seed> & { entities: Record<string, string | null> };
   test.skip(!s.entities.hub_a, "run with E2E_PERF_GRAPH=1");
   await login(page);

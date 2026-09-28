@@ -123,10 +123,12 @@ async def run_agent_turn(
             worker_id=f"agent-live:{user_message.id}",
         )
 
-    detail = await conversation_service.get_conversation(
-        user_id=user_id, conversation_id=conversation_id, message_limit=1000
+    # The NEWEST messages (Phase 11 re-verification): reading the oldest 1000
+    # and taking their tail silently dropped the user's own new message once a
+    # conversation passed 1000 messages.
+    window = await conversation_service.recent_messages(
+        user_id=user_id, conversation_id=conversation_id, limit=_AGENT_WINDOW_MESSAGES
     )
-    window = detail.messages[-_AGENT_WINDOW_MESSAGES:]
     window_text = "\n".join(f"{m.role.value}: {m.content}" for m in window)
 
     # `propose_memory_update` grounds its proposal against THIS turn's own

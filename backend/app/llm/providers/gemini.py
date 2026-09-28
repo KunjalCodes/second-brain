@@ -57,6 +57,29 @@ logger = logging.getLogger(__name__)
 #: schema Gemini itself was told.
 _UNSUPPORTED_SCHEMA_KEYS = frozenset({"additionalProperties"})
 
+#: Validation-only bounds, also stripped before sending. Found running the app
+#: against real Gemini: with them, the extraction schema (`ExtractionResult`)
+#: is rejected with HTTP 400 "The specified schema produces a constraint that
+#: has too many states for serving" -- every extraction job then failed as a
+#: configuration error. Gemini's constrained decoding compiles each length /
+#: count / range / pattern bound into its grammar; Pydantic still enforces all
+#: of them on the response in `complete_structured`, so nothing is weakened.
+#: `enum` and `type` are kept: they shape the output and are cheap.
+_VALIDATION_ONLY_SCHEMA_KEYS = frozenset(
+    {
+        "maxLength",
+        "minLength",
+        "maxItems",
+        "minItems",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "pattern",
+    }
+)
+_STRIPPED_SCHEMA_KEYS = _UNSUPPORTED_SCHEMA_KEYS | _VALIDATION_ONLY_SCHEMA_KEYS
+
 
 def _to_gemini_schema(schema_cls: type[BaseModel]) -> dict:
     """Convert a Pydantic model to a dict Gemini's `response_schema` accepts.
@@ -65,7 +88,9 @@ def _to_gemini_schema(schema_cls: type[BaseModel]) -> dict:
     Schema output and Gemini's Developer API structured-output mode:
 
     1. `additionalProperties` is unsupported in any form (see
-       `_UNSUPPORTED_SCHEMA_KEYS`) -- stripped recursively.
+       `_UNSUPPORTED_SCHEMA_KEYS`) -- stripped recursively, together with the
+       validation-only bounds that make a large schema too complex to serve
+       (`_VALIDATION_ONLY_SCHEMA_KEYS`).
     2. `$ref`/`$defs` round-tripped fine through the `google-genai` SDK's own
        Pydantic-class conversion in testing, but this function builds the
        dict by hand from `model_json_schema()` instead of handing Gemini the
@@ -91,7 +116,7 @@ def _to_gemini_schema(schema_cls: type[BaseModel]) -> dict:
             return {
                 key: _inline(value)
                 for key, value in node.items()
-                if key not in _UNSUPPORTED_SCHEMA_KEYS
+                if key not in _STRIPPED_SCHEMA_KEYS
             }
         if isinstance(node, list):
             return [_inline(item) for item in node]

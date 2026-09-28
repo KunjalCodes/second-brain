@@ -130,6 +130,20 @@ class MessageRepository(UserScopedRepository):
         result = await self._session.execute(stmt)
         return [_to_domain(row) for row in result.scalars()]
 
+    async def list_recent(self, *, conversation_id: str, limit: int) -> list[Message]:
+        """The newest `limit` messages, oldest first -- the agent's window.
+
+        `list(limit=N, offset=0)` returns the OLDEST N, so taking its tail is
+        only right while the conversation is shorter than N."""
+        stmt = (
+            self._select(MessageRow)
+            .where(MessageRow.conversation_id == conversation_id)
+            .order_by(MessageRow.sequence.desc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [_to_domain(row) for row in reversed(result.scalars().all())]
+
     async def list_by_sequence_range(
         self, *, conversation_id: str, start_sequence: int, end_sequence: int
     ) -> list[Message]:

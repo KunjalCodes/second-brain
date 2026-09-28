@@ -108,7 +108,28 @@ async def _closed_loop(
     return sample
 
 
-def _requests(seed: dict, headers: dict[str, str]) -> dict[str, object]:
+async def _setup(client: httpx.AsyncClient, seed: dict, headers: dict[str, str]) -> dict:
+    """Per-run fixtures for scenarios that need server-chosen ids: one
+    `relates_to` edge (for evidence) and one conversation (for agent turns)."""
+    r = await client.get(
+        f"/graph/entities/{seed['entities']['drawing_extractor']}/neighborhood",
+        headers=headers,
+    )
+    r.raise_for_status()
+    edge = next(x for x in r.json()["edges"] if x["kind"] == "relates_to")
+    conv = await client.post("/conversations", json={"title": "load test"}, headers=headers)
+    conv.raise_for_status()
+    return {
+        "evidence": {
+            "source_entity_id": edge["source"],
+            "target_entity_id": edge["target"],
+            "predicate": edge["predicate"],
+        },
+        "conversation_id": conv.json()["id"],
+    }
+
+
+def _requests(seed: dict, headers: dict[str, str], fixtures: dict) -> dict[str, object]:
     m = seed["memories"]
     e = seed["entities"]
 
@@ -126,6 +147,14 @@ def _requests(seed: dict, headers: dict[str, str]) -> dict[str, object]:
         "hybrid_search": lambda c: c.post(
             "/search", json={"query": "OCR", "limit": 50}, headers=headers
         ),
+        "edge_evidence": get("/graph/edges/evidence", **fixtures["evidence"]),
+        # With LLM_PROVIDER=fake this measures the agent loop, tools and
+        # storage around an offline answer -- never a real model's latency.
+        "agent_turn": lambda c: c.post(
+            f"/conversations/{fixtures['conversation_id']}/agent-turn",
+            json={"message": "What OCR library does Drawing Extractor use now?"},
+            headers=headers,
+        ),
     }
 
 
@@ -140,7 +169,7 @@ async def main() -> int:
     p.add_argument(
         "--scenarios",
         default="auth_me,memory_search,memory_detail,provenance,graph_overview,"
-        "graph_neighborhood,documents,hybrid_search",
+        "graph_neighborhood,documents,hybrid_search,edge_evidence,agent_turn",
     )
     p.add_argument("--login-levels", default="1,5,10")
     p.add_argument("--login-requests", type=int, default=20)
@@ -156,7 +185,7 @@ async def main() -> int:
     async with httpx.AsyncClient(base_url=args.base_url, timeout=60, limits=limits) as client:
         token = await _login(client, seed["a"]["email"], seed["password"])
         headers = {"Authorization": f"Bearer {token}"}
-        reqs = _requests(seed, headers)
+        reqs = _requests(seed, headers, await _setup(client, seed, headers))
         for name in scenarios:
             if name == "login":
                 per_level = {}

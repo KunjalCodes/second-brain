@@ -110,6 +110,21 @@ class TestToGeminiSchema:
         assert not _has_key(schema, "$ref")
         assert not _has_key(schema, "$defs")
 
+    def test_strips_validation_only_bounds_but_keeps_enums_and_types(self) -> None:
+        """Real Gemini rejected the full extraction schema with HTTP 400 ("too
+        many states for serving") until these bounds were stripped; Pydantic
+        still enforces them on the response."""
+        from app.models.extraction import ExtractionResult
+
+        schema = _to_gemini_schema(ExtractionResult)
+        for key in (
+            "maxLength", "minLength", "maxItems", "minItems", "minimum", "maximum", "pattern",
+        ):  # fmt: skip
+            assert not _has_key(schema, key), key
+        assert _has_key(schema, "enum")
+        candidate = schema["properties"]["candidates"]["items"]
+        assert candidate["properties"]["confidence"]["type"] == "number"
+
     def test_still_produces_a_json_serializable_dict(self) -> None:
         class Simple(BaseModel):
             model_config = ConfigDict(extra="forbid")

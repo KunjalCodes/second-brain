@@ -128,6 +128,18 @@ class ConversationService:
         )
         return ConversationDetail(conversation=conversation, messages=messages)
 
+    async def recent_messages(
+        self, *, user_id: str, conversation_id: str, limit: int
+    ) -> list[Message]:
+        """The newest `limit` messages of a conversation, oldest first."""
+        conv_repo = ConversationRepository(self._session, user_id=user_id)
+        if await conv_repo.get(conversation_id=conversation_id) is None:
+            raise NotFoundError(
+                "Conversation not found", details={"conversation_id": conversation_id}
+            )
+        msg_repo = MessageRepository(self._session, user_id=user_id)
+        return await msg_repo.list_recent(conversation_id=conversation_id, limit=limit)
+
     async def list_conversations(
         self, *, user_id: str, limit: int, offset: int
     ) -> ConversationListResponse:

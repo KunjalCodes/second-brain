@@ -12,6 +12,8 @@ Phase 5's separate `-m llm` suite, not this one.
 from __future__ import annotations
 
 import json
+import re
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -22,7 +24,9 @@ from app.embeddings.fake import FakeEmbeddingClient
 from app.llm.fake import FakeLLMClient
 from app.main import app
 from app.models.agent import AgentStep, FinalAnswerStep, ToolCallStep
+from app.models.conversation import MessageRole
 from app.repositories.memory_repository import MemoryRepository
+from app.repositories.message_repository import MessageRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.memory import MemoryCreate
 from app.services.memory_service import MemoryService
@@ -164,3 +168,39 @@ class TestAgentTurnEndpoint:
             headers={"X-User-Id": other_user_id},
         )
         assert response.status_code == 404
+
+    async def test_window_is_the_newest_messages_of_a_long_conversation(
+        self,
+        client,
+        db,
+        user_id,
+        pg_cleanup,  # noqa: ANN001
+    ) -> None:
+        """Past 1000 messages the agent used to see messages 991-1000 -- never
+        the user's new question (Phase 11 re-verification)."""
+        conversation_id = await _create_conversation(client, user_id)
+        async with db.session() as session:
+            repo = MessageRepository(session, user_id=user_id)
+            for i in range(1005):
+                await repo.append(
+                    message_id=str(uuid.uuid4()),
+                    conversation_id=conversation_id,
+                    role=MessageRole.USER,
+                    content=f"filler message number {i}",
+                    token_count=None,
+                    now=JAN,
+                )
+        fake = FakeLLMClient(response=_final("ok", []))
+        app.dependency_overrides[get_llm] = lambda: fake
+
+        response = await client.post(
+            f"/conversations/{conversation_id}/agent-turn",
+            json={"message": "the newest question"},
+            headers={"X-User-Id": user_id},
+        )
+        assert response.status_code == 201, response.text
+        prompt = fake.calls[0]["prompt"]
+        # Window = 10 newest: the question plus fillers 996..1004.
+        shown = {int(n) for n in re.findall(r"filler message number (\d+)\b", prompt)}
+        assert "the newest question" in prompt
+        assert shown == set(range(996, 1005))

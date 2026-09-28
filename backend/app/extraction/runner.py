@@ -194,6 +194,23 @@ async def finalize_document(
             )
 
 
+def _schema_problems(exc: LLMResponseInvalidError, limit: int = 8) -> str:
+    """Which fields failed validation and why -- field paths and Pydantic's
+    messages only, never the offending values (`input`), so it is safe to log
+    and useful in the repair prompt. Providers put `exc.errors()` in
+    `details["errors"]`; anything else yields ""."""
+    errors = exc.details.get("errors") if isinstance(exc.details, dict) else None
+    if not isinstance(errors, list):
+        return ""
+    parts = []
+    for err in errors[:limit]:
+        if isinstance(err, dict):
+            loc = ".".join(str(x) for x in err.get("loc", ()))
+            parts.append(f"{loc}: {err.get('msg', '')}")
+    more = len(errors) - limit
+    return "; ".join(parts) + (f"; and {more} more" if more > 0 else "")
+
+
 class ExtractionRunner:
     """Processes exactly one claimed job per `run` call.
 
@@ -680,10 +697,13 @@ class ExtractionRunner:
                 timeout=self._settings.llm_timeout_seconds,
             )
         except LLMResponseInvalidError as exc:
+            problems = _schema_problems(exc)
+            logger.warning("llm_response_invalid attempt=1 problems=%s", problems or "unknown")
             repair_prompt = (
                 f"{prompt}\n\n"
-                f"Your previous response was rejected: {exc.message}. "
-                f"Return ONLY JSON matching the required schema -- no other text."
+                f"Your previous response was rejected: {exc.message}"
+                + (f" ({problems})" if problems else "")
+                + ". Return ONLY JSON matching the required schema -- no other text."
             )
             return await self._llm.complete_structured(
                 prompt=repair_prompt,

@@ -52,6 +52,10 @@ uv run python ../scripts/manage_users.py create --email you@example.com
 * `lib/api/client.ts` is the only module that performs HTTP. It uses
   `credentials: "include"` and `cache: "no-store"`, and never sets an
   `Authorization` header.
+* `proxy.ts` sets the Content-Security-Policy per request, with a fresh
+  script nonce (`script-src 'self' 'nonce-…' 'strict-dynamic'`, no
+  `'unsafe-inline'`). Because of that, every page is rendered per request
+  (the root layout calls `connection()`); see the ADR 0029 amendment.
 * The session is the HttpOnly `sb_session` cookie. JavaScript never sees a
   token, and nothing is written to web storage.
 * After a backend API change:

@@ -46,3 +46,36 @@ must enforce it.
   scripts are allowed. A nonce-based CSP would require dynamic rendering
   of every page and is deferred.
 * Rich formatting of memory content is intentionally unavailable.
+
+## Amendment (Phase 11 re-verification, 2026-09-28): strict script CSP
+
+The deferred nonce-based CSP is now in place.
+
+**Where the policy is set.** `frontend/proxy.ts` sets the CSP per request,
+with a fresh nonce:
+- `script-src 'self' 'nonce-<n>' 'strict-dynamic'`, with no
+  `'unsafe-inline'`;
+- `'unsafe-eval'` in development only.
+
+Next.js applies the nonce to its own scripts during rendering. The root
+layout calls `connection()`, so every page is rendered per request.
+
+**Unchanged:**
+- The other directives.
+- `style-src 'unsafe-inline'`. React renders `style` attributes, which a
+  nonce cannot cover, and style injection cannot execute code.
+
+**Cost:** pages are no longer prerendered. Measured locally, JS bytes were
+identical, and LCP and auth bootstrap stayed within run-to-run noise
+(`docs/PHASE11_REPORT.md`).
+
+**Tests:**
+- `e2e/csp.spec.ts`:
+  - the header is strict;
+  - the nonce differs per request;
+  - every served `<script>` carries it;
+  - six pages run with zero `securitypolicyviolation` events.
+- `tests/unit/csp.test.ts`.
+
+The CSP remains defence in depth. Inert rendering is still the primary
+control.

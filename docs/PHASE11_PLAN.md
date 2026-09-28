@@ -1177,7 +1177,8 @@ must leave the suite green.
   equivalent, and it is documented if scaling out.
 * Real production deployment, SLOs, paid tiers, multi-region, autoscaling.
 * A subprocess or sandbox PDF parser (J8 is bounded, not solved) [L].
-* A nonce-based CSP (needs dynamic rendering, per ADR 0029).
+* A nonce-based CSP (needs dynamic rendering, per ADR 0029). *Done later, in the
+  2026-09-28 re-verification: see `docs/PHASE11_REPORT.md` and the ADR 0029 amendment.*
 * Durable object storage in staging (designed, deferred per D3).
 * Backend type checking (mypy/pyright), deferred.
 * Changing graph budgets to improve benchmarks.

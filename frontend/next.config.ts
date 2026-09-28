@@ -38,26 +38,10 @@ function resolveBackendOrigin(): string {
 const backendOrigin = resolveBackendOrigin();
 
 /**
- * Baseline security headers (ADR 0029). The CSP forbids plugins, framing and
- * foreign connections; the API is same-origin so `connect-src 'self'`.
- * Next.js injects small inline bootstrap scripts, hence 'unsafe-inline' for
- * script-src in production builds; 'unsafe-eval' only in development (React
- * dev tooling). No backend content is ever rendered as HTML, so the XSS
- * defence does not rest on the CSP alone.
+ * Baseline security headers (ADR 0029). The Content-Security-Policy is NOT
+ * set here: it needs a fresh script nonce per request, so `proxy.ts` sets it
+ * (Phase 11 M12; strict `script-src`, no 'unsafe-inline').
  */
-const isDev = process.env.NODE_ENV !== "production";
-const csp = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join("; ");
 
 /**
  * Phase 11 (M12 upload-path finding): the Next.js proxy BUFFERS proxied
@@ -89,7 +73,6 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: [
-          { key: "Content-Security-Policy", value: csp },
           { key: "Referrer-Policy", value: "same-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
