@@ -99,9 +99,19 @@ class ProvenanceService:
                             page_end=chunk.page_end,
                             heading_context=chunk.heading_context,
                         )
+            found: bool | None = None
+            if source.source_type is SourceType.MESSAGE:
+                found = message is not None
+            elif source.source_type is SourceType.DOCUMENT:
+                wants_chunk = parse_chunk_id_from_location(source.location) is not None
+                found = document is not None and (document_chunk is not None or not wants_chunk)
             resolved.append(
                 SourceProvenance(
-                    source=source, message=message, document=document, document_chunk=document_chunk
+                    source=source,
+                    message=message,
+                    document=document,
+                    document_chunk=document_chunk,
+                    resolved=found,
                 )
             )
         return resolved

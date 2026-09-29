@@ -1,0 +1,35 @@
+{
+  "description": "Controlled retrieval scenarios for eval/memory_quality_runner.py (Phase 14 M8). One synthetic user; memories are created directly (this measures retrieval, not extraction). Day offsets are from 2026-01-01; queries run at 'now'.",
+  "now": "2026-06-01T00:00:00+00:00",
+  "k": 5,
+  "memories": [
+    {"key": "atlas_render", "day": 10, "content": "Atlas is hosted on Render.", "entities": [["Atlas", "project"], ["Render", "technology"]], "rels": [["Atlas", "hosted_on", "Render"]]},
+    {"key": "atlas_pg", "day": 11, "content": "Atlas uses PostgreSQL for storage.", "entities": [["Atlas", "project"], ["PostgreSQL", "technology"]], "rels": [["Atlas", "uses", "PostgreSQL"]]},
+    {"key": "atlas_redis", "day": 12, "content": "Atlas uses Redis for caching.", "entities": [["Atlas", "project"], ["Redis", "technology"]], "rels": [["Atlas", "uses", "Redis"]]},
+    {"key": "deploy", "day": 13, "content": "The team deploys new releases every Tuesday afternoon.", "entities": [], "rels": []},
+    {"key": "priya", "day": 14, "content": "Priya Shah tests Cutlist Optimizer every Friday.", "entities": [["Priya Shah", "person"], ["Cutlist Optimizer", "project"]], "rels": [["Priya Shah", "tests", "Cutlist Optimizer"]]},
+    {"key": "cutlist_dep", "day": 15, "content": "Cutlist Optimizer depends on Drawing Extractor output.", "entities": [["Cutlist Optimizer", "project"], ["Drawing Extractor", "project"]], "rels": [["Cutlist Optimizer", "depends_on", "Drawing Extractor"]]},
+    {"key": "easy", "day": 9, "content": "Drawing Extractor uses EasyOCR for text recognition.", "entities": [["Drawing Extractor", "project"], ["EasyOCR", "technology"]], "rels": [["Drawing Extractor", "uses", "EasyOCR"]]},
+    {"key": "paddle", "day": 124, "content": "Drawing Extractor switched to PaddleOCR for text recognition.", "entities": [["Drawing Extractor", "project"], ["PaddleOCR", "technology"]], "rels": [["Drawing Extractor", "uses", "PaddleOCR"]], "supersedes": "easy"},
+    {"key": "ai", "day": 16, "content": "AI features are planned for the third quarter.", "entities": [["AI", "concept"]], "rels": []},
+    {"key": "office_pune", "day": 17, "content": "The Atlas office is in Pune.", "entities": [["Atlas", "project"], ["Pune", "other"]], "rels": [["Atlas", "located_in", "Pune"]]},
+    {"key": "office_mumbai", "day": 18, "content": "The Atlas office is in Mumbai.", "entities": [["Atlas", "project"], ["Mumbai", "other"]], "rels": [["Atlas", "located_in", "Mumbai"]], "status": "conflicting"},
+    {"key": "d_music", "day": 19, "content": "Spotify playlists help me focus while coding.", "entities": [["Spotify", "company"]], "rels": []},
+    {"key": "d_coffee", "day": 20, "content": "The coffee machine on floor two is broken.", "entities": [], "rels": []},
+    {"key": "d_retro", "day": 21, "content": "The weekly retro happens on Thursday.", "entities": [], "rels": []}
+  ],
+  "queries": [
+    {"id": "H1_exact", "category": "exact_fact", "query": "Where is Atlas hosted?", "expect": ["atlas_render"]},
+    {"id": "H2_paraphrase", "category": "paraphrased_fact", "query": "When do deployments happen?", "expect": ["deploy"]},
+    {"id": "H3_related", "category": "related_fact", "query": "Who tests Cutlist Optimizer?", "expect": ["priya"]},
+    {"id": "H4_multi_hop", "category": "multi_hop", "query": "Which OCR engine does Cutlist Optimizer rely on indirectly?", "expect": ["paddle"]},
+    {"id": "H5_historical", "category": "historical_fact", "query": "What OCR did Drawing Extractor use before?", "expect": ["easy"], "forbid": ["paddle"]},
+    {"id": "H6_current", "category": "historical_fact", "query": "What OCR does Drawing Extractor use now?", "expect": ["paddle"], "forbid": ["easy"]},
+    {"id": "H7_no_longer", "category": "historical_fact", "query": "Which OCR does Drawing Extractor no longer use?", "expect": ["easy"], "forbid": ["paddle"]},
+    {"id": "H8_as_of", "category": "historical_fact", "query": "What OCR did Drawing Extractor use as of March 2026?", "expect": ["easy"], "forbid": ["paddle"]},
+    {"id": "H9_conflicting", "category": "conflicting_fact", "query": "Where is the Atlas office?", "expect": ["office_pune", "office_mumbai"]},
+    {"id": "H10_substring_entity", "category": "irrelevant_memory", "query": "Who said the build failed yesterday?", "expect": [], "forbid": ["ai"]},
+    {"id": "H11_missing", "category": "missing_memory", "query": "What is my favourite film?", "expect": []},
+    {"id": "H12_multiple", "category": "multiple_related", "query": "What does Atlas use?", "expect": ["atlas_pg", "atlas_redis"]}
+  ]
+}

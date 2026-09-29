@@ -109,3 +109,19 @@ decision engine rather than being bolted on.
   needs CPU-always-allocated or `min-instances >= 1`, otherwise extraction is
   throttled mid-flight. This is the first Phase 2 decision that makes host choice
   non-arbitrary.
+
+
+## Amendment (Phase 14, 2026-09-29)
+
+**Debounce removed.** A pending job used to be retargeted to the newest
+message in a burst. The prompt extracts only from the TARGET, so every earlier
+message was silently never extracted and stayed `queued` forever. This was
+observed live (`docs/PHASE14_MEMORY_MODEL.md` §0).
+
+Every gated message now gets its own job. The cost is one LLM call per gated
+message, the same as the non-burst path.
+
+**Short-message gate.** The gate also lets through a short first-person
+declarative with a durable verb ("I use Postgres now."), which the 25-character
+floor used to drop for good. The sweep's re-check runs the same gate, so a skip
+was permanent.

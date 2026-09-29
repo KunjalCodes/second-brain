@@ -38,6 +38,27 @@ from app.models.extraction import CandidateMemory, DecisionType
 from app.models.lifecycle import is_currently_believed
 from app.models.normalization import normalize_name
 
+#: Predicates that normally hold SEVERAL values at once (Phase 14, M6). "Atlas
+#: uses PostgreSQL" and "Atlas uses Redis" are concurrent facts, not a
+#: contradiction -- before Phase 14 every second value was stored as
+#: CONFLICTING and sent to review. Any predicate NOT listed keeps the
+#: conservative single-valued behaviour (a different value without a change
+#: signal is CONFLICTING), so an unknown predicate can only err towards review,
+#: never towards silently accepting a contradiction.
+MULTI_VALUED_PREDICATES = frozenset(
+    {
+        "uses", "depends_on", "works_on", "works_with", "knows", "contains", "related_to",
+        "mentions", "integrates_with", "supports", "collaborates_with", "tests",
+        "evaluated_against", "owns", "member_of", "part_of", "has", "maintains",
+        "contributes_to", "manages", "leads", "speaks", "learned", "studies", "teaches",
+        "attended", "visited", "created", "wrote", "reviewed", "plays",
+    }  # fmt: skip
+)
+
+
+def is_multi_valued(predicate: str) -> bool:
+    return predicate in MULTI_VALUED_PREDICATES
+
 
 @dataclass(frozen=True)
 class ExistingEdge:
@@ -89,6 +110,7 @@ def classify_relationship(
     replaces_hint: str | None,
     existing_edges: list[ExistingEdge],
     now: datetime,
+    candidate_is_past: bool = False,
 ) -> RelationshipDecision:
     """Classify one asserted `(source, predicate, target)` edge.
 
@@ -149,6 +171,26 @@ def classify_relationship(
                     f"{hint_matches[0].target_normalized_name!r}",
                     target_memory_id=hint_matches[0].memory_id,
                 )
+            if replaces_hint_normalized is not None:
+                # The model named what changed FROM, and it is not on record:
+                # superseding the one fact that IS on record would attribute the
+                # change to the wrong thing (Phase 14, M6).
+                if is_multi_valued(predicate):
+                    return RelationshipDecision(
+                        DecisionType.NEW,
+                        f"a change from {replaces_hint!r}, which is not a recorded "
+                        f"{predicate!r} value; the recorded values are unaffected",
+                    )
+                return RelationshipDecision(
+                    DecisionType.CONFLICTING,
+                    f"a change from {replaces_hint!r} was stated, but the recorded "
+                    f"value is different; flagged instead of superseding the wrong fact",
+                    target_memory_id=(
+                        active_different_target[0].memory_id
+                        if len(active_different_target) == 1
+                        else None
+                    ),
+                )
             if len(active_different_target) == 1:
                 return RelationshipDecision(
                     DecisionType.SUPERSEDING,
@@ -161,6 +203,18 @@ def classify_relationship(
                 "candidate signals a change but multiple active facts exist for "
                 "this source and predicate with no matching replaces_hint -- too "
                 "ambiguous to safely choose which one to supersede",
+            )
+        if candidate_is_past:
+            return RelationshipDecision(
+                DecisionType.NEW,
+                "describes a past state that has already ended, so it cannot "
+                "contradict the current one",
+            )
+        if is_multi_valued(predicate):
+            return RelationshipDecision(
+                DecisionType.NEW,
+                f"{predicate!r} can hold several values at once; the new value "
+                f"coexists with the recorded one(s)",
             )
         return RelationshipDecision(
             DecisionType.CONFLICTING,

@@ -49,3 +49,12 @@ test("ranked search is a POST and shows relevance as relative", async ({ page })
   await expect(page.getByText("Relevance (relative)").first()).toBeVisible();
   expect(page.url()).not.toContain("PaddleOCR");
 });
+
+test("the decision trail says when a memory has no extraction record (never invents one)", async ({ page }) => {
+  // e2e seed memories are created directly, not extracted from a conversation.
+  await page.goto(`/memories/${seed().memories.paddleocr}`);
+  const section = page.getByRole("region", { name: "How this memory was decided" });
+  await expect(section).toBeVisible();
+  await expect(section.getByText(/added directly, not extracted/)).toBeVisible();
+  await expect(section.getByText(/not a probability/)).toBeVisible();
+});

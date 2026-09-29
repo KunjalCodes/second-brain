@@ -272,7 +272,7 @@ class TestConflictingProposal:
                 ],
                 relationships=[
                     CandidateRelationship(
-                        source="Drawing Extractor", predicate="uses", target="EasyOCR"
+                        source="Drawing Extractor", predicate="ocr_engine", target="EasyOCR"
                     )
                 ],
             ),
@@ -299,7 +299,7 @@ class TestConflictingProposal:
                 ],
                 relationships=[
                     CandidateRelationship(
-                        source="Drawing Extractor", predicate="uses", target="PaddleOCR"
+                        source="Drawing Extractor", predicate="ocr_engine", target="PaddleOCR"
                     )
                 ],
                 # No is_change signal -- an unsignalled contradiction, never

@@ -23,6 +23,13 @@ class SourceProvenance(BaseModel):
     #: could no longer be resolved (e.g. the document was later deleted).
     document: DocumentSummary | None = None
     document_chunk: DocumentChunkSummary | None = None
+    #: Phase 14 (M11): whether the originating object was found. True: the
+    #: message / document (and chunk, when one is named) exists. False: the
+    #: source was recorded but what it points at can no longer be found --
+    #: exposed rather than left for a client to infer. None: this source type
+    #: has no stored original to look up (user statement, URL, tool result,
+    #: system inference).
+    resolved: bool | None = None
 
 
 class ProvenanceView(BaseModel):

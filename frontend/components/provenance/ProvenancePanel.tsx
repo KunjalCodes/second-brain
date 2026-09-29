@@ -35,6 +35,9 @@ export function safeHttpUrl(raw: string | null | undefined): string | null {
 }
 
 export function isResolved(sp: SourceProvenance): boolean {
+  // Phase 14 (M11): the server states it explicitly; the inference is kept for
+  // responses from older backends.
+  if (sp.resolved != null) return sp.resolved;
   return Boolean(sp.message || sp.document || sp.document_chunk);
 }
 

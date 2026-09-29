@@ -694,6 +694,29 @@ export interface paths {
         patch: operations["update_memory_memories__memory_id__patch"];
         trace?: never;
     };
+    "/memories/{memory_id}/explanation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Why is this remembered? Decisions, sources, history and review state
+         * @description Phase 14 (M17): every extraction decision that created or corroborated
+         *     the memory (with the memory-worthiness rule and temporal interpretation),
+         *     its resolved sources, relationships, supersede/conflict/duplicate links and
+         *     review items -- all from stored records, nothing generated.
+         */
+        get: operations["get_memory_explanation_memories__memory_id__explanation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memories/{memory_id}/invalidate": {
         parameters: {
             query?: never;
@@ -1498,6 +1521,44 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /** ExtractionDecisionView */
+        ExtractionDecisionView: {
+            /** Decision */
+            decision: string;
+            /** Model Confidence */
+            model_confidence: number | null;
+            /** Model Reasoning */
+            model_reasoning: string | null;
+            /** Persistence */
+            persistence: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "creation" | "corroboration";
+            /** Source Id */
+            source_id: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "message" | "document_chunk";
+            /** Temporal Hints */
+            temporal_hints: {
+                [key: string]: unknown;
+            };
+            /** Temporal Interpretation */
+            temporal_interpretation: string | null;
+            /** Worthiness Rule */
+            worthiness_rule: string | null;
+        };
         /**
          * ExtractionJob
          * @description One unit of extraction work over a window of messages OR document
@@ -1835,6 +1896,36 @@ export interface components {
             superseded_by?: string[];
             /** Supersedes */
             supersedes?: string[];
+        };
+        /** MemoryExplanation */
+        MemoryExplanation: {
+            /**
+             * Confidence Note
+             * @default Confidence is the extraction model's own estimate for the statement it proposed, stored as metadata. It is not a probability that the fact is true, and it never overrides the sources or the validity window.
+             */
+            confidence_note: string;
+            /** Conflicts With */
+            conflicts_with: string[];
+            /** Decisions */
+            decisions: components["schemas"]["ExtractionDecisionView"][];
+            /** Duplicate Of */
+            duplicate_of: string[];
+            memory: components["schemas"]["Memory"];
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "extraction" | "direct";
+            /** Relationships */
+            relationships: components["schemas"]["Relationship"][];
+            /** Review */
+            review: components["schemas"]["ReviewItemView"][];
+            /** Sources */
+            sources: components["schemas"]["SourceProvenance"][];
+            /** Superseded By */
+            superseded_by: string[];
+            /** Supersedes */
+            supersedes: string[];
         };
         /** MemoryInvalidate */
         MemoryInvalidate: {
@@ -2240,6 +2331,24 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ReviewItemView */
+        ReviewItemView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Other Memory Id */
+            other_memory_id: string;
+            /** Score */
+            score: number | null;
+            /** Status */
+            status: string;
+        };
         /**
          * ReviewReconciliationResult
          * @description Counts from one reconciliation sweep run across a bounded page of users
@@ -2320,6 +2429,8 @@ export interface components {
             document?: components["schemas"]["DocumentSummary"] | null;
             document_chunk?: components["schemas"]["DocumentChunkSummary"] | null;
             message?: components["schemas"]["Message"] | null;
+            /** Resolved */
+            resolved?: boolean | null;
             source: components["schemas"]["Source"];
         };
         /**
@@ -3640,6 +3751,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Memory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_memory_explanation_memories__memory_id__explanation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryExplanation"];
                 };
             };
             /** @description Validation Error */

@@ -5,6 +5,7 @@ export const qk = {
   memoriesAll: ["memories"] as const,
   memory: (id: string) => ["memory", id] as const,
   provenance: (id: string) => ["provenance", id] as const,
+  explanation: (id: string) => ["explanation", id] as const,
   timeline: (id: string) => ["timeline", id] as const,
   entitySearch: (q: string) => ["entity-search", q] as const,
   entity: (id: string) => ["entity", id] as const,

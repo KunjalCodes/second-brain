@@ -159,7 +159,10 @@ async def run_scenario(db: Database, graph: GraphClient, settings, spec: dict) -
     # Cleanup -- eval runs must not leave data behind, matching the integration
     # test fixtures' contract.
     async with db.session() as session:
+        # Children first: review rows reference extraction candidates (the
+        # FK this cleanup used to violate -- docs/PHASE11_PLAN.md known issue).
         for table in (
+            "review_audit_log", "memory_review_candidates",
             "extraction_candidates", "extraction_jobs", "entity_merge_candidates",
             "memory_embeddings", "messages", "conversations", "users",
         ):

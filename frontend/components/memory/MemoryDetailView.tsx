@@ -14,6 +14,7 @@ import { ErrorState, LoadingRows } from "@/components/ui/States";
 import { ProvenancePanel } from "@/components/provenance/ProvenancePanel";
 import { LinkedMemory } from "./LinkedMemory";
 import { RetractDialog } from "./RetractDialog";
+import { WhyRemembered } from "./WhyRemembered";
 
 function entityName(entities: Entity[], id: string): string {
   return entities.find((e) => e.id === id)?.name ?? "another entity";
@@ -144,6 +145,7 @@ export function MemoryDetailView({ id }: { id: string }) {
         )}
       </section>
 
+      <WhyRemembered memoryId={m.id} />
       <Lifecycle d={d} />
       <ProvenancePanel memoryId={m.id} conflictsWith={d.conflicts_with ?? []} />
 

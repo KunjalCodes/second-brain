@@ -143,3 +143,23 @@ class TestDeterminism:
         }
         forbidden = {"httpx", "requests", "neo4j", "asyncpg", "sqlalchemy", "google"}
         assert not (imported & forbidden)
+
+
+class TestShortDeclaratives:
+    """Phase 14 (M1): short durable first-person facts were skipped forever."""
+
+    @pytest.mark.parametrize(
+        "content",
+        ["I use Postgres now.", "We switched to Rust.", "My team uses Linear.", "I lead Atlas."],
+    )
+    def test_short_durable_first_person_statements_pass(self, content: str) -> None:
+        assert len(content) < MIN_CHARS
+        assert evaluate_gate(_message(content), min_chars=MIN_CHARS).passed is True
+
+    @pytest.mark.parametrize(
+        "content",
+        ["I'm tired today.", "Do I use Postgres?", "Use Postgres.", "I use it", "ok we use"],
+    )
+    def test_other_short_messages_are_still_skipped(self, content: str) -> None:
+        decision = evaluate_gate(_message(content), min_chars=MIN_CHARS)
+        assert decision.passed is False, content

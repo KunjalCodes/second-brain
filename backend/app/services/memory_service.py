@@ -46,7 +46,9 @@ class MemoryService:
 
     # -- commands ----------------------------------------------------------
 
-    async def create(self, *, user_id: str, payload: MemoryCreate) -> MemoryDetail:
+    async def create(
+        self, *, user_id: str, payload: MemoryCreate, open_start: bool = False
+    ) -> MemoryDetail:
         """Create a memory with its entities, relationships, source and supersessions.
 
         The whole write is one transaction (see MemoryRepository.create), and the
@@ -59,10 +61,16 @@ class MemoryService:
         memory_id = self._new_id()
         if memory_id in payload.supersedes:
             raise ValidationError("A memory cannot supersede itself")
+        payload = await self._redirect_merged_entities(user_id, payload)
 
         entities, by_normalized = self._build_entities(payload)
         relationships = self._build_relationships(
-            payload, by_normalized, user_id=user_id, memory_id=memory_id, now=now
+            payload,
+            by_normalized,
+            user_id=user_id,
+            memory_id=memory_id,
+            now=now,
+            open_start=open_start,
         )
 
         if payload.supersedes and not payload.relationships:
@@ -85,7 +93,10 @@ class MemoryService:
             "updated_at": now,
             # A memory with no stated start is true from the moment it was recorded,
             # which keeps `as_of` queries total: every stored fact has a start.
-            "valid_from": payload.valid_from or now,
+            # `open_start` (Phase 14): an extracted past fact with a known end but
+            # no known start ("used Heroku until May") -- stamping the recording
+            # time as its start would put the start after the end.
+            "valid_from": payload.valid_from or (None if open_start else now),
             "valid_until": payload.valid_until,
         }
         # Neo4j does not store null properties; drop them rather than writing nulls.
@@ -99,6 +110,7 @@ class MemoryService:
             source=self._build_source(payload),
             supersedes=payload.supersedes,
             now=now,
+            superseded_at=payload.valid_from or now,
         )
 
         stored = await self._repo.get(user_id=user_id, memory_id=memory_id)
@@ -227,6 +239,11 @@ class MemoryService:
     async def get(self, *, user_id: str, memory_id: str) -> MemoryDetail:
         return await self._require(user_id=user_id, memory_id=memory_id)
 
+    async def search_by_terms(
+        self, *, user_id: str, terms: list[str], limit: int
+    ) -> list[tuple[str, str]]:
+        return await self._repo.search_by_terms(user_id=user_id, terms=terms, limit=limit)
+
     async def search(
         self,
         *,
@@ -278,6 +295,37 @@ class MemoryService:
             raise NotFoundError("Memory not found", details={"memory_id": memory_id})
         return found
 
+    async def _redirect_merged_entities(self, user_id: str, payload: MemoryCreate) -> MemoryCreate:
+        """Point every entity (and relationship endpoint) that names a merged-away
+        entity at its canonical entity; the name as written is kept as an alias
+        (Phase 14, M3). One bounded read; a no-op when nothing was merged."""
+        if not payload.entities:
+            return payload
+        redirects = await self._repo.resolve_merged_names(
+            user_id=user_id,
+            normalized_names=sorted({normalize_name(e.name) for e in payload.entities}),
+        )
+        if not redirects:
+            return payload
+
+        def canonical(name: str) -> str:
+            hit = redirects.get(normalize_name(name))
+            return hit[0] if hit else name
+
+        entities = []
+        for e in payload.entities:
+            hit = redirects.get(normalize_name(e.name))
+            if hit is None:
+                entities.append(e)
+                continue
+            aliases = list(dict.fromkeys([*e.aliases, e.name]))
+            entities.append(e.model_copy(update={"name": hit[0], "aliases": aliases}))
+        relationships = [
+            r.model_copy(update={"source": canonical(r.source), "target": canonical(r.target)})
+            for r in payload.relationships
+        ]
+        return payload.model_copy(update={"entities": entities, "relationships": relationships})
+
     def _build_entities(
         self, payload: MemoryCreate
     ) -> tuple[list[dict[str, Any]], dict[str, str]]:
@@ -315,6 +363,7 @@ class MemoryService:
         user_id: str,
         memory_id: str,
         now: datetime,
+        open_start: bool = False,
     ) -> list[dict[str, Any]]:
         """Validate asserted edges and attach provenance plus a validity window."""
         relationships: list[dict[str, Any]] = []
@@ -345,7 +394,7 @@ class MemoryService:
                 "confidence": rel.confidence,
                 # Provenance: which memory asserted this edge.
                 "memory_id": memory_id,
-                "valid_from": rel.valid_from or payload.valid_from or now,
+                "valid_from": rel.valid_from or payload.valid_from or (None if open_start else now),
                 "valid_until": rel.valid_until or payload.valid_until,
                 "created_at": now,
                 "updated_at": now,

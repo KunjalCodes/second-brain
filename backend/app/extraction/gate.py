@@ -35,6 +35,19 @@ _FILLER_PHRASES = frozenset(
 
 _PUNCTUATION = re.compile(r"[^\w\s]")
 
+#: Phase 14 (M1): a short first-person declarative with a durable verb ("I use
+#: Postgres now.", "We switched to Rust.") is exactly the kind of fact the
+#: length floor used to drop for good -- the sweep's re-check runs this same
+#: gate, so a skip here was permanent. Narrow on purpose: subject pronoun first,
+#: a durable verb, at least three words, and not a question.
+_SHORT_DECLARATIVE = re.compile(
+    r"^\s*(?:i|we|my|our)\b.*\b(?:use|uses|prefer|work|works|live|switched|moved|decided|"
+    r"chose|picked|run|runs|deploy|deploys|own|lead|manage)\b",
+    re.IGNORECASE,
+)
+#: "I use it" names nothing -- not worth an LLM call.
+_ENDS_WITH_PRONOUN = re.compile(r"\b(?:it|that|this|them|one|those|these)\W*$", re.IGNORECASE)
+
 
 @dataclass(frozen=True)
 class GateDecision:
@@ -72,7 +85,12 @@ def evaluate_gate(message: Message, *, min_chars: int) -> GateDecision:
     if not content:
         return GateDecision(False, "empty message")
 
-    if len(content) < min_chars:
+    if len(content) < min_chars and not (
+        len(content.split()) >= 3
+        and not content.endswith("?")
+        and _SHORT_DECLARATIVE.search(content)
+        and not _ENDS_WITH_PRONOUN.search(content)
+    ):
         return GateDecision(
             False, f"shorter than the {min_chars}-character minimum"
         )

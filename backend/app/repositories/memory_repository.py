@@ -89,13 +89,20 @@ RETURN r.id AS id
 """
 
 #: Close out superseded memories. `coalesce` preserves an explicitly-set valid_until
-#: rather than overwriting the caller's stated end date.
+#: rather than overwriting the caller's stated end date. The old fact ends when the
+#: new one became true (`$superseded_at`, its valid_from -- Phase 14), not when the
+#: write happened; if that instant is not after the old fact's own start (facts
+#: processed out of order), fall back to `$now` rather than write an inverted window.
 SUPERSEDE_MEMORIES = """
 UNWIND $supersedes AS old_id
 MATCH (old:Memory {id: old_id, user_id: $user_id})
 MATCH (new:Memory {id: $memory_id, user_id: $user_id})
 SET old.status = $superseded_status,
-    old.valid_until = coalesce(old.valid_until, $now),
+    old.valid_until = coalesce(
+        old.valid_until,
+        CASE WHEN old.valid_from IS NULL OR $superseded_at > old.valid_from
+             THEN $superseded_at ELSE $now END
+    ),
     old.updated_at = $now
 MERGE (new)-[:SUPERSEDES]->(old)
 RETURN collect(DISTINCT old.id) AS superseded_ids
@@ -105,7 +112,11 @@ SUPERSEDE_RELATIONSHIPS = """
 UNWIND $supersedes AS old_id
 MATCH ()-[r:RELATES_TO {user_id: $user_id, memory_id: old_id}]->()
 SET r.status = $superseded_status,
-    r.valid_until = coalesce(r.valid_until, $now),
+    r.valid_until = coalesce(
+        r.valid_until,
+        CASE WHEN r.valid_from IS NULL OR $superseded_at > r.valid_from
+             THEN $superseded_at ELSE $now END
+    ),
     r.updated_at = $now
 RETURN count(r) AS closed
 """
@@ -299,7 +310,33 @@ ORDER BY m.id ASC
 LIMIT $limit
 """
 
+#: Phase 14 (M3): which of these names belong to an entity that was merged
+#: away, and into what. A write naming "Open AI" after "Open AI" was merged into
+#: "OpenAI" used to MERGE onto the merged-away node, so the new fact was
+#: invisible from the canonical entity. Bounded (depth <= 5, as RESOLVE_ENTITY)
+#: and user-scoped on every node.
+RESOLVE_MERGED_NAMES = """
+UNWIND $names AS name
+MATCH (e:Entity {user_id: $user_id, normalized_name: name})-[:MERGED_INTO*1..5]->
+      (c:Entity {user_id: $user_id})
+WHERE NOT (c)-[:MERGED_INTO]->()
+RETURN name, c.name AS canonical_name, c.normalized_name AS canonical_normalized
+"""
+
+#: Phase 14 (M8): the keyword channel's term match -- memories containing any of
+#: a few stemmed query terms. Bounded by $limit; the same per-user content scan
+#: the whole-query CONTAINS search already does.
+SEARCH_BY_TERMS = """
+MATCH (m:Memory {user_id: $user_id})
+WHERE any(t IN $terms WHERE toLower(m.content) CONTAINS t)
+RETURN m.id AS id, toLower(m.content) AS content
+ORDER BY m.created_at DESC, m.id
+LIMIT $limit
+"""
+
 USER_SCOPED_STATEMENTS: tuple[str, ...] = (
+    RESOLVE_MERGED_NAMES,
+    SEARCH_BY_TERMS,
     CREATE_MEMORY,
     MERGE_ENTITIES,
     MERGE_SOURCE,
@@ -337,6 +374,7 @@ class MemoryRepository:
         source: dict[str, Any] | None,
         supersedes: list[str],
         now: datetime,
+        superseded_at: datetime | None = None,
     ) -> None:
         """Write a complete memory in a single transaction.
 
@@ -374,11 +412,35 @@ class MemoryRepository:
                 **common,
                 "supersedes": supersedes,
                 "superseded_status": MemoryStatus.SUPERSEDED.value,
+                "superseded_at": superseded_at or now,
             }
             steps.append(TxStep(SUPERSEDE_MEMORIES, supersede_params, check=verify_all_superseded))
             steps.append(TxStep(SUPERSEDE_RELATIONSHIPS, supersede_params))
 
         await self._client.write_transaction(steps)
+
+    async def search_by_terms(
+        self, *, user_id: str, terms: list[str], limit: int
+    ) -> list[tuple[str, str]]:
+        """(memory id, lowercased content) for memories containing any term."""
+        if not terms:
+            return []
+        rows = await self._client.read(
+            SEARCH_BY_TERMS, {"user_id": user_id, "terms": terms, "limit": limit}
+        )
+        return [(r["id"], r["content"]) for r in rows]
+
+    async def resolve_merged_names(
+        self, *, user_id: str, normalized_names: list[str]
+    ) -> dict[str, tuple[str, str]]:
+        """normalized name -> (canonical name, canonical normalized name), for
+        the names that were merged away; names not merged are absent."""
+        if not normalized_names:
+            return {}
+        rows = await self._client.read(
+            RESOLVE_MERGED_NAMES, {"user_id": user_id, "names": normalized_names}
+        )
+        return {r["name"]: (r["canonical_name"], r["canonical_normalized"]) for r in rows}
 
     async def get(self, *, user_id: str, memory_id: str) -> MemoryDetail | None:
         rows = await self._client.read(GET_MEMORY, {"user_id": user_id, "memory_id": memory_id})
@@ -595,6 +657,8 @@ class MemoryRepository:
             "memory_id": winner_id,
             "supersedes": [loser_id],
             "now": now,
+            # A reviewer's decision takes effect when it is made (unchanged).
+            "superseded_at": now,
             "superseded_status": MemoryStatus.SUPERSEDED.value,
         }
         results = await self._client.write_transaction(

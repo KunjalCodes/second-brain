@@ -17,10 +17,14 @@ take.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from app.models.normalization import normalize_name
 
-_NON_ALPHANUMERIC = re.compile(r"[^a-z0-9]+")
+_NON_ALPHANUMERIC = re.compile(r"[\W_]+")
+#: A key this short is not evidence of anything ("C++" and "C#" both reduce to
+#: "c") -- Phase 14, M3: a false merge candidate costs a reviewer's trust.
+_MIN_KEY_LENGTH = 3
 
 
 def canonical_key(name: str) -> str:
@@ -32,7 +36,13 @@ def canonical_key(name: str) -> str:
     *identity* would be unsafe for exactly that reason; using it only to flag a
     *possible* duplicate for review is the whole point of this module.
     """
-    return _NON_ALPHANUMERIC.sub("", name.lower())
+    # Phase 14 (M3): Unicode-aware. The old `[^a-z0-9]` stripped every
+    # non-ASCII letter, so every name written in a non-Latin script reduced to
+    # "" and all of them "matched" each other. Diacritics are folded
+    # ("Zoë" ~ "Zoe"); letters of every script are kept.
+    decomposed = unicodedata.normalize("NFKD", name.casefold())
+    folded = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return _NON_ALPHANUMERIC.sub("", folded)
 
 
 def is_plausible_duplicate(name_a: str, name_b: str) -> bool:
@@ -48,4 +58,5 @@ def is_plausible_duplicate(name_a: str, name_b: str) -> bool:
     """
     if normalize_name(name_a) == normalize_name(name_b):
         return False
-    return canonical_key(name_a) == canonical_key(name_b)
+    key = canonical_key(name_a)
+    return len(key) >= _MIN_KEY_LENGTH and key == canonical_key(name_b)

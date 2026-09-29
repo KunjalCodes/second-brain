@@ -48,28 +48,22 @@ async def maybe_trigger_extraction(
         )
         return
 
+    # One job per gated message (Phase 14). The earlier debounce retargeted a
+    # still-pending job to the newest message; the prompt extracts only from
+    # the TARGET, so every earlier message in a burst was silently never
+    # extracted and stayed `queued` forever (docs/PHASE14_MEMORY_MODEL.md §0,
+    # step 9). The cost is one LLM call per gated message -- the same as the
+    # non-burst path always paid.
     window_start = max(0, message.sequence - settings.extraction_window_size + 1)
-    pending = await job_repo.find_pending_job_for_conversation(
-        conversation_id=message.conversation_id
+    await job_repo.create_job(
+        job_id=id_fn(),
+        conversation_id=message.conversation_id,
+        target_message_id=message.id,
+        window_start_sequence=window_start,
+        window_end_sequence=message.sequence,
+        extractor_version=settings.extractor_version,
+        now=now,
     )
-    if pending is not None:
-        # Debounce: a burst of messages collapses into one extraction over an
-        # extended window rather than one job per message.
-        await job_repo.extend_job(
-            job_id=pending.id,
-            target_message_id=message.id,
-            window_end_sequence=message.sequence,
-        )
-    else:
-        await job_repo.create_job(
-            job_id=id_fn(),
-            conversation_id=message.conversation_id,
-            target_message_id=message.id,
-            window_start_sequence=window_start,
-            window_end_sequence=message.sequence,
-            extractor_version=settings.extractor_version,
-            now=now,
-        )
 
     await message_repo.set_extraction_status(
         message_id=message.id, status=ExtractionStatus.QUEUED

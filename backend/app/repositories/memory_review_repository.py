@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert
 
 from app.db.models import MemoryReviewCandidate as ReviewRow
@@ -80,6 +80,17 @@ class MemoryReviewCandidateRepository(UserScopedRepository):
         listing (that is `list_unreviewed`, scoped to `unreviewed` only).
         """
         stmt = self._select(ReviewRow).where(ReviewRow.status == status).limit(limit)
+        result = await self._session.execute(stmt)
+        return [_row_to_dict(row) for row in result.scalars()]
+
+    async def list_for_memory(self, *, memory_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Review items naming this memory on either side (Phase 14, M17)."""
+        stmt = (
+            self._select(ReviewRow)
+            .where(or_(ReviewRow.memory_id_a == memory_id, ReviewRow.memory_id_b == memory_id))
+            .order_by(ReviewRow.created_at.desc())
+            .limit(limit)
+        )
         result = await self._session.execute(stmt)
         return [_row_to_dict(row) for row in result.scalars()]
 

@@ -50,6 +50,11 @@ class FakeMemoryRepository:
         self.supersessions: list[tuple[str, str]] = []           # (new_id, old_id)
         self.conflicts: list[tuple[str, str]] = []               # (memory_id_a, memory_id_b)
 
+    async def resolve_merged_names(
+        self, *, user_id: str, normalized_names: list[str]
+    ) -> dict[str, tuple[str, str]]:
+        return {}  # this double never merges entities
+
     async def create(
         self,
         *,
@@ -60,6 +65,7 @@ class FakeMemoryRepository:
         source: dict[str, Any] | None,
         supersedes: list[str],
         now: datetime,
+        superseded_at: datetime | None = None,
     ) -> None:
         # Validate the whole write before mutating anything, mirroring the real
         # repository's single transaction.
@@ -112,16 +118,24 @@ class FakeMemoryRepository:
         if source:
             self._attach_source(user_id=user_id, memory_id=memory_id, source=source, now=now)
 
+        # Mirrors SUPERSEDE_MEMORIES: close at the new fact's time unless that
+        # would not be after the old fact's start.
+        at = superseded_at or now
         for old_id in supersedes:
             old = self.memories[(user_id, old_id)]
             old["status"] = MemoryStatus.SUPERSEDED.value
-            old["valid_until"] = old.get("valid_until") or now
+            start = old.get("valid_from")
+            old["valid_until"] = old.get("valid_until") or (
+                at if start is None or at > start else now
+            )
             old["updated_at"] = now
             self.supersessions.append((memory_id, old_id))
             for rel in self.relationships:
                 if rel.memory_id == old_id:
                     rel.status = MemoryStatus.SUPERSEDED
-                    rel.valid_until = rel.valid_until or now
+                    rel.valid_until = rel.valid_until or (
+                        at if rel.valid_from is None or at > rel.valid_from else now
+                    )
                     rel.updated_at = now
 
     async def get(self, *, user_id: str, memory_id: str) -> MemoryDetail | None:

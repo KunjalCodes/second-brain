@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -125,6 +126,43 @@ class RetrievalExplanation:
     #: exactly when `graph_relevance` is `None` (PHASE4_PLAN.md section 13).
     graph_distance: int | None = None
     graph_path: list[GraphPathStep] | None = None
+
+
+_STOPWORDS = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "can", "could",
+        "did", "do", "does", "doing", "done", "for", "from", "had", "has", "have", "how",
+        "i", "in", "into", "is", "it", "its", "me", "my", "mine", "no", "not", "now", "of",
+        "on", "or", "our", "ours", "so", "still", "than", "that", "the", "their", "them",
+        "then", "there", "these", "they", "this", "those", "to", "too", "us", "use", "used",
+        "uses", "using", "was", "we", "were", "what", "when", "where", "which", "while",
+        "who", "whom", "whose", "why", "will", "with", "would", "you", "your", "anymore",
+        "longer", "currently", "before", "previously", "ever", "again",
+    }
+)
+_TOKEN = re.compile(r"[a-z0-9][a-z0-9+#.\-]*[a-z0-9+#]|[a-z0-9]")
+_MIN_TERM_COVERAGE = 0.5
+_SUFFIXES = ("ments", "ment", "ings", "ing", "ies", "es", "ed", "s")
+
+
+def _stem(word: str) -> str:
+    for suffix in _SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            return word[: -len(suffix)] + ("y" if suffix == "ies" else "")
+    return word
+
+
+def query_terms(query: str, *, max_terms: int = 8) -> list[str]:
+    """Content terms of a query, crudely stemmed ("deployments" -> "deploy"),
+    stopwords and words shorter than 3 characters dropped, order kept."""
+    seen: list[str] = []
+    for word in _TOKEN.findall(query.lower()):
+        if len(word) < 3 or word in _STOPWORDS:
+            continue
+        stem = _stem(word)
+        if stem not in seen:
+            seen.append(stem)
+    return seen[:max_terms]
 
 
 @dataclass(frozen=True)
@@ -256,7 +294,7 @@ class HybridRetrievalService:
         memory_ids = set(vector_hits) | set(keyword_hits) | set(graph_hits)
         candidates: list[RankingInput] = []
         details: dict[str, MemoryDetail] = {}
-        for memory_id in memory_ids:
+        for memory_id in sorted(memory_ids):
             try:
                 detail = await self._memory_service.get(user_id=user_id, memory_id=memory_id)
             except NotFoundError:
@@ -287,6 +325,11 @@ class HybridRetrievalService:
                 )
             )
 
+        # Equal scores: newest first, then id -- a stable, meaningful order that
+        # is the same on every run (ids alone are random per write).
+        candidates.sort(
+            key=lambda c: (-details[c.memory_id].memory.created_at.timestamp(), c.memory_id)
+        )
         weights = RankingWeights(
             vector=self._settings.retrieval_weight_vector,
             graph=self._settings.retrieval_weight_graph,
@@ -369,11 +412,26 @@ class HybridRetrievalService:
         channel (PHASE3_PLAN.md section 8) rather than replaced. Score 1.0 for
         every hit -- an exact substring match is binary, not graded.
         """
+        limit = self._settings.retrieval_top_k * 3
         result = await self._memory_service.search(
-            user_id=user_id, query=query, include_excluded=True,
-            limit=self._settings.retrieval_top_k * 3, offset=0,
+            user_id=user_id, query=query, include_excluded=True, limit=limit, offset=0,
         )
-        return {m.id: 1.0 for m in result.items}
+        hits = {m.id: 1.0 for m in result.items}
+        # Phase 14 (M8): a question almost never occurs verbatim in a memory, so
+        # the whole-query match above was inert for questions (0 recall alone in
+        # eval/memory_quality_runner.py). Term match: the fraction of the
+        # query's content terms (stemmed) that the memory contains.
+        terms = query_terms(query)
+        if terms:
+            for memory_id, content in await self._memory_service.search_by_terms(
+                user_id=user_id, terms=terms, limit=limit
+            ):
+                score = sum(1 for t in terms if t in content) / len(terms)
+                # One shared word is not evidence ("Cobalt" of a different
+                # Cobalt entity): at least half the query's terms must appear.
+                if score >= _MIN_TERM_COVERAGE:
+                    hits[memory_id] = max(hits.get(memory_id, 0.0), score)
+        return hits
 
     async def _graph_candidates(self, *, user_id: str, query: str) -> dict[str, GraphHit]:
         """Entity-anchored, bounded multi-hop retrieval (PHASE4_PLAN.md
@@ -421,7 +479,15 @@ class HybridRetrievalService:
             return {}
 
         query_lower = query.lower()
-        mentioned = [e for e in entities if e.normalized_name in query_lower]
+        # Whole-token mentions only (Phase 14, M8): a raw substring test let the
+        # entity "AI" match inside "said". Names may contain punctuation
+        # ("fly.io", "c++"), so the boundary is "no letter or digit on either
+        # side" rather than \b.
+        mentioned = [
+            e
+            for e in entities
+            if re.search(rf"(?<![\w]){re.escape(e.normalized_name)}(?![\w])", query_lower)
+        ]
         if not mentioned:
             return {}
 

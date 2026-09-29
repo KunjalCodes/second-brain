@@ -55,3 +55,21 @@ class TestPlausibleDuplicate:
         forbidden_verbs = ("merge", "rename", "delete", "replace")
         for name in public_names:
             assert not any(verb in name.lower() for verb in forbidden_verbs), name
+
+
+class TestPhase14UnicodeAndShortKeys:
+    """Phase 14 (M3): false merge candidates are worse than missed ones."""
+
+    def test_distinct_non_latin_names_are_not_duplicates(self) -> None:
+        # the old ASCII-only key reduced both to "" -> "duplicate"
+        assert is_plausible_duplicate("東京", "大阪") is False
+
+    def test_non_latin_spacing_variant_is_still_flagged(self) -> None:
+        assert is_plausible_duplicate("東京タワー", "東京 タワー") is True
+
+    def test_diacritic_variant_is_flagged(self) -> None:
+        assert is_plausible_duplicate("Zoë", "Zoe") is True
+
+    def test_keys_too_short_to_be_evidence_are_never_flagged(self) -> None:
+        assert is_plausible_duplicate("C++", "C#") is False
+        assert is_plausible_duplicate("C", "c.") is False

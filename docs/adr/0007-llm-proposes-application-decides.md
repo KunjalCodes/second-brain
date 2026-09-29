@@ -77,3 +77,31 @@ persistent memory**:
   can be attributed rather than guessed at.
 * The cost is an extra layer: the LLM's richer intent must be expressed through a
   deliberately narrow schema. That narrowness is the point.
+
+
+## Amendment (Phase 14, 2026-09-29)
+
+**What changed:**
+- **Multi-valued predicates:** the engine now knows a fixed set of
+  multi-valued predicates (`app/extraction/decisions.py`:
+  `MULTI_VALUED_PREDICATES`, e.g. `uses`, `depends_on`). A second value of one
+  of these is **NEW**, not CONFLICTING: "Atlas uses PostgreSQL" and "Atlas uses
+  Redis" coexist.
+- **Other predicates** keep the conservative rule: a different value with no
+  change signal is CONFLICTING.
+- **A stated change from an unrecorded value** ("switched from Tesseract"
+  when only EasyOCR is on record) no longer supersedes the one recorded fact:
+  - for a multi-valued predicate it is NEW;
+  - otherwise it is CONFLICTING.
+- **A past state** ("used Heroku until May") never conflicts with the current
+  one.
+- **Memory-worthiness** is no longer the model's label alone.
+  `app/extraction/worthiness.py` applies explainable rules first:
+  - hypotheticals, calculations and activities in progress are ignored;
+  - explicit user instructions are stored even when labelled temporary.
+
+  The rule is recorded in `decision_reason` as `[worthiness:<code>]`.
+
+The LLM still only proposes; these are more precise application decisions.
+
+**Evidence:** `eval/memory_quality_runner.py` (A, F).

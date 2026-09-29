@@ -38,6 +38,8 @@ export const getMemory = (id: string, signal?: AbortSignal) =>
   apiRequest<T.MemoryDetail>(`/memories/${enc(id)}`, { signal });
 export const getProvenance = (id: string, signal?: AbortSignal) =>
   apiRequest<T.ProvenanceView>(`/memories/${enc(id)}/provenance`, { signal });
+export const getMemoryExplanation = (id: string, signal?: AbortSignal) =>
+  apiRequest<T.MemoryExplanation>(`/memories/${enc(id)}/explanation`, { signal });
 export const invalidateMemory = (id: string, reason: string | null) =>
   apiRequest<T.Memory>(`/memories/${enc(id)}/invalidate`, { method: "POST", json: { reason } });
 

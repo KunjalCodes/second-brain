@@ -493,7 +493,7 @@ class TestScenario8_Contradiction:
                     ],
                     relationships=[
                         CandidateRelationship(
-                            source="Drawing Extractor", predicate="uses", target="EasyOCR"
+                            source="Drawing Extractor", predicate="ocr_engine", target="EasyOCR"
                         )
                     ],
                     message_id="placeholder", source_span=Span(start=0, end=len(c1)),
@@ -517,7 +517,7 @@ class TestScenario8_Contradiction:
                     ],
                     relationships=[
                         CandidateRelationship(
-                            source="Drawing Extractor", predicate="uses", target="Tesseract"
+                            source="Drawing Extractor", predicate="ocr_engine", target="Tesseract"
                         )
                     ],
                     message_id="placeholder", source_span=Span(start=0, end=len(c2)),

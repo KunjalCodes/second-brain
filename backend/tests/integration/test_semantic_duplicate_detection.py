@@ -354,8 +354,10 @@ class TestSemanticDuplicateDetection:
 
         now2 = JAN + timedelta(seconds=1)
         c2_text = "Just confirming again: I really enjoy early morning hiking in the mountains."
+        # Near-identical, not identical: since Phase 14 an IDENTICAL statement is an
+        # exact DUPLICATE (see the next test); this one exercises the semantic path.
         c2 = candidate(
-            statement="User enjoys early morning hikes in the mountains",
+            statement="User enjoys early morning hikes in mountains",
             entities=[
                 CandidateEntity(
                     name="Hiking", entity_type="concept", mention_span=span(c2_text, "hiking")
@@ -375,6 +377,45 @@ class TestSemanticDuplicateDetection:
             worker_id="sd-6",
         )
         assert records[0].decision in (DecisionType.LIKELY_DUPLICATE, DecisionType.FLAGGED)
+
+    async def test_an_identical_bare_statement_is_an_exact_duplicate(
+        self,
+        db,
+        graph,
+        settings,
+        user_id,
+        conversation_id,
+        memory_service,
+        pg_cleanup,
+        cleanup,  # noqa: ANN001
+    ) -> None:
+        """Phase 14 (M7): identical text corroborates the existing memory
+        (DUPLICATE, a second source) instead of a second active copy."""
+        statement = "User enjoys early morning hikes in the mountains"
+        records = []
+        for i, text_ in enumerate(
+            [
+                "I really enjoy working on early morning hiking in the mountains.",
+                "Just confirming again: I really enjoy early morning hiking in the mountains.",
+            ]
+        ):
+            c = candidate(
+                statement=statement,
+                entities=[
+                    CandidateEntity(
+                        name="Hiking", entity_type="concept", mention_span=span(text_, "hiking")
+                    )
+                ],
+                source_span=Span(start=0, end=len(text_)),
+            )
+            records = await _turn(
+                db, graph, settings, user_id=user_id, conversation_id=conversation_id,
+                content=text_, candidates=[c], now=JAN + timedelta(seconds=i),
+                worker_id=f"sd-exact-{i}",
+            )  # fmt: skip
+        assert records[0].decision is DecisionType.DUPLICATE
+        found = await memory_service.search(user_id=user_id, query="early morning hikes")
+        assert found.total == 1
 
 
 class TestEntityResolutionEmbeddingEnhancement:

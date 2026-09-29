@@ -63,6 +63,7 @@ CONTRACT_TESTS: dict[str, str] = {
     "PATCH /memories/{memory_id}": "unit/test_api.py",
     "POST /memories/{memory_id}/invalidate": "unit/test_api.py",
     "GET /memories/{memory_id}/provenance": "integration/test_auth.py",
+    "GET /memories/{memory_id}/explanation": "integration/test_memory_intelligence.py",
     "GET /review/entities": "integration/test_contracts.py",
     "GET /review/entities/{candidate_id}": "integration/test_contracts.py",
     "POST /review/entities/{candidate_id}/approve-merge": "integration/test_contracts.py",

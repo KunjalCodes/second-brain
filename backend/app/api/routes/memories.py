@@ -16,6 +16,7 @@ from app.api.deps import (
     RATE_LIMIT_WRITE,
     CurrentUser,
     EmbeddingClientDep,
+    MemoryExplanationServiceDep,
     MemoryServiceDep,
     ProvenanceServiceDep,
     SettingsDep,
@@ -25,6 +26,7 @@ from app.db.engine import get_database
 from app.embeddings.base import EmbeddingClient
 from app.models.domain import Memory, MemoryDetail
 from app.models.enums import MemoryStatus, MemoryType
+from app.schemas.explanation import MemoryExplanation
 from app.schemas.memory import (
     MemoryCreate,
     MemoryInvalidate,
@@ -165,6 +167,23 @@ async def get_memory_provenance(
     back through PostgreSQL to the actual conversation message.
     """
     return await service.get_provenance(user_id=user_id, memory_id=memory_id)
+
+
+@router.get(
+    "/{memory_id}/explanation",
+    response_model=MemoryExplanation,
+    summary="Why is this remembered? Decisions, sources, history and review state",
+)
+async def get_memory_explanation(
+    memory_id: str,
+    user_id: CurrentUser,
+    service: MemoryExplanationServiceDep,
+) -> MemoryExplanation:
+    """Phase 14 (M17): every extraction decision that created or corroborated
+    the memory (with the memory-worthiness rule and temporal interpretation),
+    its resolved sources, relationships, supersede/conflict/duplicate links and
+    review items -- all from stored records, nothing generated."""
+    return await service.explain(user_id=user_id, memory_id=memory_id)
 
 
 @router.patch(

@@ -409,7 +409,7 @@ class TestResolveConflict:
                     ],
                     relationships=[
                         CandidateRelationship(
-                            source="Drawing Extractor", predicate="uses", target="EasyOCR"
+                            source="Drawing Extractor", predicate="ocr_engine", target="EasyOCR"
                         )
                     ],
                     source_span=Span(start=0, end=len(c1)),
@@ -441,7 +441,7 @@ class TestResolveConflict:
                     ],
                     relationships=[
                         CandidateRelationship(
-                            source="Drawing Extractor", predicate="uses", target="Tesseract"
+                            source="Drawing Extractor", predicate="ocr_engine", target="Tesseract"
                         )
                     ],
                     source_span=Span(start=0, end=len(c2)),

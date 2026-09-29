@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from app.core.config import Settings
@@ -53,13 +53,14 @@ from app.embeddings.base import EmbeddingClient
 from app.extraction.decisions import (
     ExistingEdge,
     RelationshipDecision,
-    classify_candidate_persistence,
     classify_relationship,
     overall_decision,
 )
 from app.extraction.grounding import check_grounding
 from app.extraction.resolution import is_plausible_duplicate
+from app.extraction.temporal_hints import TemporalInterpretation, interpret_temporal
 from app.extraction.trigger import maybe_trigger_extraction
+from app.extraction.worthiness import evaluate_worthiness
 from app.graph.connection import GraphClient
 from app.llm.base import LLMClient
 from app.llm.prompts.document_extraction_v1 import build_document_extraction_prompt
@@ -103,6 +104,10 @@ from app.services.memory_service import MemoryService
 from app.services.retrieval_service import RetrievalService
 
 logger = logging.getLogger(__name__)
+
+
+def _statement_key(text: str) -> str:
+    return " ".join(text.casefold().split()).rstrip(".!")
 
 #: Applied per failed attempt: attempt 1 -> 60s, attempt 2 -> 120s, attempt 3 -> 240s
 #: ... capped at one hour, so a prolonged provider outage does not busy-loop the
@@ -439,6 +444,7 @@ class ExtractionRunner:
                         embedding_repo=embedding_repo,
                         db=db,
                         now=now,
+                        stated_at=target.created_at,
                     )
                     record, created = await candidates_repo.record_candidate(
                         candidate_id=self._new_id(),
@@ -755,6 +761,63 @@ class ExtractionRunner:
         embedding_repo: EmbeddingRepository,
         db: Database,
         now: datetime,
+        stated_at: datetime | None = None,
+    ) -> CandidateApplication:
+        """Memory-worthiness first (Phase 14, M1: `app.extraction.worthiness`),
+        then the unchanged classify-and-persist path. Every recorded reason is
+        tagged with the worthiness rule that let the candidate through (or
+        stopped it), so "why was this stored / not stored?" has an answer."""
+        worth = evaluate_worthiness(candidate, target_text=target_content)
+        if not worth.store:
+            return CandidateApplication(DecisionType.IGNORE, f"{worth.tag()} {worth.reason}", None)
+        # Valid time (Phase 14, M5): when the fact was STATED -- the message's own
+        # time -- adjusted by any temporal hint the model reported, never the
+        # moment this job happened to run (a deferred job used to date every
+        # fact to the day the quota recovered).
+        said = stated_at or now
+        temporal = interpret_temporal(
+            valid_from_hint=candidate.temporal.valid_from_hint,
+            valid_until_hint=candidate.temporal.valid_until_hint,
+            stated_at=said,
+        )
+        applied = await self._classify_and_persist(
+            candidate,
+            temporal=temporal,
+            candidate_is_past=temporal.valid_until is not None and temporal.valid_until <= said,
+            target_content=target_content,
+            source_type=source_type,
+            source_reference=source_reference,
+            source_location_prefix=source_location_prefix,
+            window_text=window_text,
+            user_id=user_id,
+            memory_service=memory_service,
+            retrieval_service=retrieval_service,
+            merge_repo=merge_repo,
+            embedding_repo=embedding_repo,
+            db=db,
+            now=now,
+        )
+        note = f" [temporal: {temporal.note}]" if temporal.note else ""
+        return replace(applied, reason=f"{worth.tag()} {applied.reason}{note}")
+
+    async def _classify_and_persist(
+        self,
+        candidate: CandidateMemory,
+        *,
+        temporal: TemporalInterpretation,
+        candidate_is_past: bool,
+        target_content: str,
+        source_type: SourceType,
+        source_reference: str,
+        source_location_prefix: str | None,
+        window_text: str,
+        user_id: str,
+        memory_service: MemoryService,
+        retrieval_service: RetrievalService,
+        merge_repo: EntityMergeCandidateRepository,
+        embedding_repo: EmbeddingRepository,
+        db: Database,
+        now: datetime,
     ) -> CandidateApplication:
         """Classify and, for every outcome but IGNORE/INVALID, persist one candidate.
 
@@ -769,12 +832,6 @@ class ExtractionRunner:
         did not catch) is caught and reported as `INVALID` so one bad candidate
         cannot abort the rest of the job.
         """
-        ignore = classify_candidate_persistence(candidate)
-        if ignore is not None:
-            return CandidateApplication(
-                ignore, f"persistence classified as {candidate.persistence!r}", None
-            )
-
         grounding = check_grounding(
             candidate,
             target_message_content=target_content,
@@ -808,6 +865,7 @@ class ExtractionRunner:
                     replaces_hint=candidate.temporal.replaces_hint,
                     existing_edges=existing_edges,
                     now=now,
+                    candidate_is_past=candidate_is_past,
                 )
                 # Semantic evidence (ADR 0009, PHASE3_PLAN.md section 5) is
                 # consulted ONLY when exact-triple matching found nothing to
@@ -832,6 +890,12 @@ class ExtractionRunner:
             # catch a duplicate bare statement (docs/PHASE2_PLAN.md's own stated
             # limitation, closed here).
             if not candidate.relationships and governing.decision is DecisionType.NEW:
+                exact = await self._exact_statement_duplicate(
+                    candidate, user_id=user_id, memory_service=memory_service
+                )
+                if exact is not None:
+                    governing = exact
+            if not candidate.relationships and governing.decision is DecisionType.NEW:
                 governing = await self._semantic_bare_statement_decision(
                     candidate,
                     user_id=user_id,
@@ -842,6 +906,7 @@ class ExtractionRunner:
 
             memory_id = await self._persist(
                 candidate,
+                temporal=temporal,
                 decision=governing,
                 source_type=source_type,
                 source_reference=source_reference,
@@ -966,6 +1031,32 @@ class ExtractionRunner:
             duplicate_threshold=self._settings.semantic_duplicate_threshold,
             flag_threshold=self._settings.semantic_flag_threshold,
         )
+
+    async def _exact_statement_duplicate(
+        self, candidate: CandidateMemory, *, user_id: str, memory_service: MemoryService
+    ) -> RelationshipDecision | None:
+        """Phase 14 (M7): a bare statement IDENTICAL to a currently believed
+        memory (case, whitespace and final punctuation aside) corroborates it --
+        DUPLICATE, a new source on the existing memory -- instead of becoming a
+        second active copy flagged as a "likely" duplicate. Identity of text is
+        deterministic evidence; semantic similarity alone still never merges."""
+        wanted = _statement_key(candidate.statement)
+        if not wanted:
+            return None
+        hits = await memory_service.search(
+            user_id=user_id,
+            query=candidate.statement.strip().rstrip(".!"),
+            statuses=[MemoryStatus.ACTIVE, MemoryStatus.CONFLICTING],
+            limit=20,
+        )
+        for item in hits.items:
+            if _statement_key(item.content) == wanted:
+                return RelationshipDecision(
+                    DecisionType.DUPLICATE,
+                    "restates an already-active identical statement",
+                    target_memory_id=item.id,
+                )
+        return None
 
     async def _semantic_bare_statement_decision(
         self,
@@ -1199,6 +1290,7 @@ class ExtractionRunner:
         self,
         candidate: CandidateMemory,
         *,
+        temporal: TemporalInterpretation,
         decision: RelationshipDecision,
         source_type: SourceType,
         source_reference: str,
@@ -1257,8 +1349,12 @@ class ExtractionRunner:
                 relationships=relationships,
                 source=source,
                 supersedes=supersedes,
+                valid_from=temporal.valid_from,
+                valid_until=temporal.valid_until,
             )
-            created = await memory_service.create(user_id=user_id, payload=payload)
+            created = await memory_service.create(
+                user_id=user_id, payload=payload, open_start=temporal.open_start
+            )
             return created.memory.id
 
         if decision.decision is DecisionType.CONFLICTING:
@@ -1270,8 +1366,12 @@ class ExtractionRunner:
                 entities=entities,
                 relationships=relationships,
                 source=source,
+                valid_from=temporal.valid_from,
+                valid_until=temporal.valid_until,
             )
-            created = await memory_service.create(user_id=user_id, payload=payload)
+            created = await memory_service.create(
+                user_id=user_id, payload=payload, open_start=temporal.open_start
+            )
             if decision.target_memory_id:
                 await memory_service.link_conflicting(
                     user_id=user_id,

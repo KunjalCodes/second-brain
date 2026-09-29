@@ -44,6 +44,7 @@ from app.services.document_service import DocumentService
 from app.services.extraction_status_service import ExtractionStatusService
 from app.services.graph_exploration_service import GraphExplorationService
 from app.services.hybrid_retrieval_service import HybridRetrievalService
+from app.services.memory_explanation_service import MemoryExplanationService
 from app.services.memory_service import MemoryService
 from app.services.provenance_service import ProvenanceService
 from app.services.rate_limit_service import LimitClass, RateLimiter
@@ -244,6 +245,13 @@ def get_provenance_service(
     return ProvenanceService(session, memory_service)
 
 
+def get_memory_explanation_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    memory_service: Annotated[MemoryService, Depends(get_memory_service)],
+) -> MemoryExplanationService:
+    return MemoryExplanationService(session, memory_service)
+
+
 def get_graph_exploration_service(
     client: Annotated[GraphClient, Depends(get_client)],
     retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
@@ -381,6 +389,9 @@ ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 DocumentStorageDep = Annotated[DocumentStorage, Depends(get_storage)]
 ProvenanceServiceDep = Annotated[ProvenanceService, Depends(get_provenance_service)]
+MemoryExplanationServiceDep = Annotated[
+    MemoryExplanationService, Depends(get_memory_explanation_service)
+]
 HybridRetrievalServiceDep = Annotated[HybridRetrievalService, Depends(get_hybrid_retrieval_service)]
 ExtractionStatusServiceDep = Annotated[
     ExtractionStatusService, Depends(get_extraction_status_service)

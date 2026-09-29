@@ -702,6 +702,7 @@ All require the same session credential as every other user route (section 3a), 
 | `GET` | `/extraction/jobs` | List extraction jobs for the user |
 | `GET` | `/extraction/jobs/{id}` | One job's status plus every candidate it produced |
 | `GET` | `/memories/{id}/provenance` | Resolve a memory's sources back to the messages that produced them |
+| `GET` | `/memories/{id}/explanation` | Why this is remembered: extraction decisions, sources, history, review (Phase 14) |
 | `POST` | `/internal/extraction/sweep` | **Not user-scoped.** Guarded by `X-Internal-Token` (`INTERNAL_API_TOKEN`). Runs one bounded sweep tick — intended for a platform cron, not end users. |
 
 ### `POST /conversations/{id}/messages`
@@ -757,6 +758,56 @@ the model.
 `message` is `null` when the source isn't a message (Phase 1 memories, or a message
 that no longer resolves) — this is the one place the API deliberately crosses the
 PostgreSQL/Neo4j boundary in a read.
+
+**Phase 14:** every source also carries `resolved`:
+- `true`: the message, document or chunk it names was found;
+- `false`: the source was recorded, but that object can no longer be found;
+- `null`: the source type has no stored original to look up (user statement,
+  URL, tool result, system inference).
+
+A missing original is reported, never papered over.
+
+### `GET /memories/{id}/explanation` (Phase 14)
+
+"Why is this remembered?" Assembled from stored records only; nothing is
+generated.
+
+```jsonc
+{
+  "memory": { "id": "...", "content": "The user always deploys Atlas on Tuesdays.", "...": "..." },
+  "origin": "extraction",            // "direct" for POST /memories (no extraction record)
+  "decisions": [{
+    "decision": "NEW",
+    "role": "creation",              // "corroboration" for a later DUPLICATE / UPDATE
+    "worthiness_rule": "explicit_user_instruction",
+    "temporal_interpretation": "valid from March 2025 (month precision) per hint 'since March 2025'",
+    "reason": "[worthiness:explicit_user_instruction] no currently active fact ... [temporal: ...]",
+    "persistence": "temporary",      // the model's own label
+    "model_confidence": 0.9,
+    "model_reasoning": "...",        // model-written text: render inert
+    "temporal_hints": {"valid_from_hint": "since March 2025"},
+    "source_kind": "message", "source_id": "<message id>", "recorded_at": "..."
+  }],
+  "sources": [ /* as in /provenance, with `resolved` */ ],
+  "relationships": [...], "supersedes": [...], "superseded_by": [...],
+  "conflicts_with": [...], "duplicate_of": [...],
+  "review": [{"id": "...", "kind": "conflicting", "status": "unreviewed", "other_memory_id": "...", "score": null, "created_at": "..."}],
+  "confidence_note": "Confidence is the extraction model's own estimate ... not a probability ..."
+}
+```
+
+**Worthiness rules** (`app/extraction/worthiness.py`):
+
+| Rule | Effect |
+|---|---|
+| `hypothetical` | Not stored |
+| `calculation` | Not stored |
+| `transient_activity` | Not stored |
+| `explicit_user_instruction` | Stored even if the model said temporary/uncertain |
+| `model_persistent` | Stored |
+| `model_temporary` / `model_uncertain` | Not stored |
+
+**Isolation:** another user's memory returns `404`.
 
 ### `POST /internal/extraction/sweep`
 

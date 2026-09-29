@@ -574,6 +574,21 @@ documented (ADR 0030), not performed.
 Production hardening & deployment readiness (implemented and verified
 locally; private staging prepared, not deployed; not production-ready).
 
+## Phase 14
+
+Memory intelligence (implemented and verified locally):
+- a deterministic memory-worthiness policy with stored reasons;
+- valid time taken from when a fact was stated, plus parsed temporal hints;
+- concurrent vs contradictory facts;
+- no lost messages in bursts;
+- writes after an entity merge;
+- Unicode-safe duplicate detection;
+- token-aware keyword and entity matching in retrieval;
+- explicit provenance resolution;
+- "Why is this remembered?".
+
+See `docs/PHASE14_REPORT.md`.
+
 ---
 
 # 🎯 Project Goal
@@ -619,6 +634,7 @@ The project explores:
 | 9 | Authentication & productization foundation: email/password accounts, opaque server-side sessions (HttpOnly cookie or Bearer), logout/logout-all/password change, CSRF Origin check and narrowed CORS, PostgreSQL rate limiting, production startup guards, operator CLI for legacy ids | ✅ Implemented — see `docs/PHASE9_PLAN.md` section 24 for measured results and known limitations |
 | 10 | Memory Explorer UI: session-cookie auth through a same-origin proxy; memories, entities, time lens (valid vs recorded time), provenance, Cytoscape graph with visible truncation, ranked search, documents, review decisions, optional Ask page; authenticated responses made `no-store` (G2); inert rendering of all content | ✅ Implemented and verified locally (unit, component, E2E, a11y). The demo deployment (optional M10) is documented only, not deployed. See `docs/PHASE10_PLAN.md` section 29 |
 | 11 | Production hardening & deployment readiness: lease-owned jobs with retryable infrastructure failures and explicit terminal states, in-process sweeper, provider-aware LLM retries (Retry-After, cooldown, throttling doesn't spend attempts), opt-in real-LLM evaluations, production startup guards, code-only readiness with migration check, no internals in errors, JSON logs + `/internal/metrics`, bounded uploads, HNSW-safe migrations, encrypted backups with a verified restore drill, live failure drills, CI secret scan + dependency audit | ✅ Implemented and verified locally. Staging deployment prepared (`docs/DEPLOYMENT.md`, `render.yaml`) but **not performed**. See `docs/PHASE11_PLAN.md` section 31 |
+| 14 | Memory intelligence: deterministic worthiness policy with stored rule codes, stated-time validity + temporal hint parsing, multi-valued predicates (concurrent ≠ conflicting), no burst message loss, merged-entity write redirect, exact-duplicate corroboration, Unicode-safe duplicate detection, word-boundary mentions + term keyword retrieval, deterministic ranking ties, `resolved` provenance flag, `GET /memories/{id}/explanation` + UI | ✅ Implemented and verified locally (memory-quality eval 21/49 → 49/49). See `docs/PHASE14_REPORT.md` |
 
 Current test count and per-phase measured evaluation results are reported in the latest phase plan's implementation-status section (`docs/PHASE11_PLAN.md` section 31) rather than duplicated here, since they change with every phase.
 

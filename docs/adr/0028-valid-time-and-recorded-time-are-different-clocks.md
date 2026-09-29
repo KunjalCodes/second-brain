@@ -56,3 +56,22 @@ May".
 * "Relevance" in ranked search is labelled relative and "not a measure of
   truth". Confidence is labelled "extraction confidence: metadata, not a
   probability".
+
+
+## Amendment (Phase 14, 2026-09-29)
+
+**Extracted facts now take valid time from when they were stated.**
+- **Default:** the message's (or chunk's) `created_at`.
+- **Hints:** adjusted by the model's temporal hints, parsed deterministically
+  (`app/extraction/temporal_hints.py`: "since March 2025", "until May",
+  "last year", ISO dates, "N months ago").
+- **Why:** before, `valid_from` was the time the job ran, so a deferred job
+  dated every fact to the day the LLM quota recovered.
+- **Supersede:** the old fact now closes at the new fact's valid time, not at
+  the processing time. If processing ran out of order, the processing time is
+  the fallback.
+- **Open start:** a past fact with an end but no known start is stored with no
+  `valid_from` ("start unknown"), never with an inverted window. As a result,
+  an `as_of` query before the end returns it [L].
+- **Unknown hints:** anything the parser does not understand falls back to
+  the stated time, and the decision reason says so.

@@ -94,18 +94,31 @@ class TestScenarioC_Superseding:
         assert d.decision is DecisionType.SUPERSEDING
         assert d.target_memory_id == "mem-easyocr"
 
-    def test_hint_mismatch_still_falls_back_to_the_single_sibling(self) -> None:
-        """A hint naming something not on record does not block superseding the
-        one fact that IS on record -- is_change=True is itself a strong signal.
+    def test_hint_naming_an_unrecorded_value_does_not_supersede_a_multi_valued_fact(
+        self,
+    ) -> None:
+        """Phase 14 (M6): "switched from Tesseract to PaddleOCR" when only EasyOCR
+        is on record used to supersede EasyOCR -- attributing the change to the
+        wrong fact. For a multi-valued predicate the new value simply coexists.
         """
         existing = [edge("easyocr", memory_id="mem-easyocr")]
         d = classify_relationship(
             predicate="uses", target_normalized="paddleocr", candidate_confidence=0.9,
-            is_change=True, replaces_hint="something else entirely",
+            is_change=True, replaces_hint="Tesseract",
             existing_edges=existing, now=NOW,
         )
-        assert d.decision is DecisionType.SUPERSEDING
-        assert d.target_memory_id == "mem-easyocr"
+        assert d.decision is DecisionType.NEW
+        assert d.target_memory_id is None
+
+    def test_hint_naming_an_unrecorded_value_flags_a_single_valued_fact(self) -> None:
+        existing = [edge("render", memory_id="mem-render")]
+        d = classify_relationship(
+            predicate="hosted_on", target_normalized="fly.io", candidate_confidence=0.9,
+            is_change=True, replaces_hint="Heroku",
+            existing_edges=existing, now=NOW,
+        )
+        assert d.decision is DecisionType.CONFLICTING
+        assert d.target_memory_id == "mem-render"
 
     def test_change_signal_multiple_siblings_no_hint_match_is_too_ambiguous(self) -> None:
         """Guessing which of several active facts to supersede would risk closing
@@ -189,7 +202,7 @@ class TestScenarioH_Conflicting:
     def test_different_active_target_no_change_signal_is_conflicting(self) -> None:
         existing = [edge("easyocr", memory_id="mem-easyocr")]
         d = classify_relationship(
-            predicate="uses", target_normalized="tesseract", candidate_confidence=0.9,
+            predicate="hosted_on", target_normalized="tesseract", candidate_confidence=0.9,
             is_change=False, replaces_hint=None, existing_edges=existing, now=NOW,
         )
         assert d.decision is DecisionType.CONFLICTING
@@ -204,7 +217,7 @@ class TestScenarioH_Conflicting:
         """
         existing = [edge("easyocr", memory_id="mem-easyocr")]
         d = classify_relationship(
-            predicate="uses", target_normalized="tesseract", candidate_confidence=0.9,
+            predicate="hosted_on", target_normalized="tesseract", candidate_confidence=0.9,
             is_change=False, replaces_hint=None, existing_edges=existing, now=NOW,
         )
         assert d.decision is DecisionType.CONFLICTING
@@ -220,7 +233,7 @@ class TestScenarioH_Conflicting:
         """
         existing = [edge("easyocr", memory_id="mem-1"), edge("tesseract", memory_id="mem-2")]
         d = classify_relationship(
-            predicate="uses", target_normalized="paddleocr", candidate_confidence=0.9,
+            predicate="hosted_on", target_normalized="paddleocr", candidate_confidence=0.9,
             is_change=False, replaces_hint=None, existing_edges=existing, now=NOW,
         )
         assert d.decision is DecisionType.CONFLICTING
@@ -285,9 +298,9 @@ class TestOverallDecision:
             is_change=False, replaces_hint=None, existing_edges=[], now=NOW,
         )
         conflicting = classify_relationship(
-            predicate="uses", target_normalized="tesseract", candidate_confidence=0.9,
+            predicate="hosted_on", target_normalized="fly.io", candidate_confidence=0.9,
             is_change=False, replaces_hint=None,
-            existing_edges=[edge("easyocr", memory_id="mem-1")], now=NOW,
+            existing_edges=[edge("render", memory_id="mem-1")], now=NOW,
         )
         assert overall_decision([new, conflicting]).decision is DecisionType.CONFLICTING
 
@@ -392,7 +405,7 @@ def test_every_decision_type_is_reachable() -> None:
             existing_edges=[edge("easyocr", memory_id="m")], now=NOW,
         ).decision,  # SUPERSEDING
         classify_relationship(
-            predicate="uses", target_normalized="tesseract", candidate_confidence=0.9,
+            predicate="hosted_on", target_normalized="tesseract", candidate_confidence=0.9,
             is_change=False, replaces_hint=None,
             existing_edges=[edge("easyocr", memory_id="m")], now=NOW,
         ).decision,  # CONFLICTING
@@ -404,3 +417,43 @@ def test_every_decision_type_is_reachable() -> None:
         DecisionType.SUPERSEDING,
         DecisionType.CONFLICTING,
     }
+
+
+class TestPhase14Cardinality:
+    """Phase 14 (M6): concurrent values of a multi-valued predicate coexist."""
+
+    def test_a_second_value_of_a_multi_valued_predicate_is_new(self) -> None:
+        existing = [edge("postgresql", memory_id="mem-pg")]
+        d = classify_relationship(
+            predicate="uses", target_normalized="redis", candidate_confidence=0.9,
+            is_change=False, replaces_hint=None, existing_edges=existing, now=NOW,
+        )
+        assert d.decision is DecisionType.NEW
+        assert "several values" in d.reason
+
+    def test_an_unknown_predicate_stays_conservative(self) -> None:
+        existing = [edge("pune", memory_id="mem-pune")]
+        d = classify_relationship(
+            predicate="office_city", target_normalized="mumbai", candidate_confidence=0.9,
+            is_change=False, replaces_hint=None, existing_edges=existing, now=NOW,
+        )
+        assert d.decision is DecisionType.CONFLICTING
+
+    def test_a_past_state_does_not_conflict_with_the_current_one(self) -> None:
+        existing = [edge("render", memory_id="mem-render")]
+        d = classify_relationship(
+            predicate="hosted_on", target_normalized="heroku", candidate_confidence=0.9,
+            is_change=False, replaces_hint=None, existing_edges=existing, now=NOW,
+            candidate_is_past=True,
+        )
+        assert d.decision is DecisionType.NEW
+        assert "past state" in d.reason
+
+    def test_a_change_with_matching_hint_still_supersedes(self) -> None:
+        existing = [edge("postgresql", memory_id="mem-pg"), edge("mysql", memory_id="mem-my")]
+        d = classify_relationship(
+            predicate="uses", target_normalized="sqlite", candidate_confidence=0.9,
+            is_change=True, replaces_hint="MySQL", existing_edges=existing, now=NOW,
+        )
+        assert d.decision is DecisionType.SUPERSEDING
+        assert d.target_memory_id == "mem-my"

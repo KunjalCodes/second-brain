@@ -375,3 +375,18 @@ class ExtractionCandidateRepository(UserScopedRepository):
         )
         result = await self._session.execute(stmt)
         return [_candidate_to_domain(row) for row in result.scalars()]
+
+    async def list_for_memory(
+        self, *, memory_id: str, limit: int = 20
+    ) -> list[ExtractionCandidateRecord]:
+        """Every extraction decision that created or corroborated this memory
+        (NEW/SUPERSEDING/... create it; DUPLICATE/UPDATE point at it), oldest
+        first -- the "why is this remembered?" trail (Phase 14, M17)."""
+        stmt = (
+            self._select(CandidateRow)
+            .where(CandidateRow.memory_id == memory_id)
+            .order_by(CandidateRow.created_at, CandidateRow.ordinal)
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [_candidate_to_domain(row) for row in result.scalars()]

@@ -36,9 +36,13 @@ class QueryIntent:
 #: Whole-word matches only (`\b`), case-insensitive -- "current" must not match
 #: inside an unrelated longer word, and matching is deliberately narrow rather
 #: than an attempt at general sentiment/tense parsing.
-_CURRENT_PATTERN = re.compile(r"\b(now|current|currently|today|at the moment)\b", re.IGNORECASE)
+_CURRENT_PATTERN = re.compile(
+    r"\b(now|current|currently|today|at the moment|anymore|any more|still)\b", re.IGNORECASE
+)
 _HISTORICAL_PATTERN = re.compile(
-    r"\b(before|previously|used to|earlier|in the past|historical(ly)?|formerly)\b",
+    # Phase 14 (M5) additions: "no longer", "did I use to", "last year".
+    r"\b(before|previously|used to|earlier|in the past|historical(ly)?|formerly|no longer|"
+    r"last year|did \w+ use to)\b",
     re.IGNORECASE,
 )
 
@@ -51,7 +55,7 @@ _MONTH_NAMES = (
 #: for CandidateTemporal hints in docs/PHASE2_PLAN.md) -- an unparsed date
 #: reference falls through to UNSPECIFIED rather than a wrong guess.
 _MONTH_PATTERN = re.compile(
-    r"\bin\s+(" + "|".join(_MONTH_NAMES) + r")\b(?:\s+(\d{4}))?", re.IGNORECASE
+    r"\b(?:in|as of)\s+(" + "|".join(_MONTH_NAMES) + r")\b(?:\s+(\d{4}))?", re.IGNORECASE
 )
 
 
@@ -65,12 +69,15 @@ def detect_temporal_intent(query: str, *, now: datetime | None = None) -> QueryI
     applies no temporal filter or ranking boost at all -- absence of detected
     intent is neutral, never a penalty.
     """
-    reference_year = (now or datetime.now(UTC)).year
+    reference = now or datetime.now(UTC)
 
     month_match = _MONTH_PATTERN.search(query)
     if month_match:
         month_index = _MONTH_NAMES.index(month_match.group(1).lower()) + 1
-        year = int(month_match.group(2)) if month_match.group(2) else reference_year
+        # No year: the most recent such month, never one in the future
+        # ("in March", asked in February, means last March -- Phase 14).
+        default_year = reference.year if month_index <= reference.month else reference.year - 1
+        year = int(month_match.group(2)) if month_match.group(2) else default_year
         return QueryIntent(TemporalIntent.AS_OF, as_of=datetime(year, month_index, 1, tzinfo=UTC))
 
     if _HISTORICAL_PATTERN.search(query):

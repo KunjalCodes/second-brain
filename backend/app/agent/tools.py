@@ -535,6 +535,7 @@ async def propose_memory_update(
                 embedding_repo=EmbeddingRepository(session, user_id=user_id),
                 db=deps.db,
                 now=now,
+                stated_at=target_message.created_at,
             )
             candidates_repo = ExtractionCandidateRepository(session, user_id=user_id)
             record, created = await candidates_repo.record_candidate(

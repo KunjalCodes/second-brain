@@ -183,7 +183,11 @@ async def _run_baseline_e(
                 ),
             )
             probe = await search_memory(search_args, user_id=user_id, deps=deps)
-            cited = sorted(set(probe.memory_ids) & expected)
+            # Phase 14 (M13/M14): a gold-blind citation policy -- the top 3 memories
+            # the search actually returned, in rank order. The previous
+            # `set(probe.memory_ids) & expected` filtered citations BY THE GOLD SET,
+            # so citation precision was 1.0 by construction and measured nothing.
+            cited = list(probe.memory_ids[:3])
             answer = (
                 "I don't have that information."
                 if probe.status is ToolStatus.NOT_FOUND
