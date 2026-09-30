@@ -18,6 +18,7 @@ import { Tag } from "@/components/ui/Chip";
 import { Button } from "@/components/ui/Button";
 import { EmptyState, ErrorState, LoadingRows, NotTimeFiltered } from "@/components/ui/States";
 import { MemoryRow } from "@/components/memory/MemoryRow";
+import { EntityContextPanel } from "./EntityContextPanel";
 
 function RelList({ items, selfId }: { items: RelationshipView[]; selfId: string }) {
   if (!items.length) return <p className="text-sm text-[var(--color-fg-muted)]">None.</p>;
@@ -25,12 +26,12 @@ function RelList({ items, selfId }: { items: RelationshipView[]; selfId: string 
     <ul className="space-y-1">
       {items.map(({ relationship: r, source_entity: s, target_entity: t }) => (
         <li key={r.id} className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-border)] p-2 text-sm">
-          {s.id === selfId ? <span className="font-medium">{s.name}</span> : <Link className="underline" href={`/entities/${s.id}`}>{s.name}</Link>}
+          {s.id === selfId ? <span className="font-medium">{s.name}</span> : <Link prefetch={false} className="underline" href={`/entities/${s.id}`}>{s.name}</Link>}
           <span className="font-mono text-xs">—{r.predicate}→</span>
-          {t.id === selfId ? <span className="font-medium">{t.name}</span> : <Link className="underline" href={`/entities/${t.id}`}>{t.name}</Link>}
+          {t.id === selfId ? <span className="font-medium">{t.name}</span> : <Link prefetch={false} className="underline" href={`/entities/${t.id}`}>{t.name}</Link>}
           <MemoryStatusChip status={r.status} />
           <span className="text-xs text-[var(--color-fg-muted)]">{validityText(r.valid_from, r.valid_until)}</span>
-          {r.memory_id ? <Link className="ml-auto text-xs underline" href={`/memories/${r.memory_id}`}>asserting memory</Link> : null}
+          {r.memory_id ? <Link prefetch={false} className="ml-auto text-xs underline" href={`/memories/${r.memory_id}`}>asserting memory</Link> : null}
         </li>
       ))}
     </ul>
@@ -93,6 +94,8 @@ export function EntityPage({ id }: { id: string }) {
           <Link className="underline" href={`/memories?entity=${encodeURIComponent(e.name)}`}>Filter memories by this entity →</Link>
         </div>
       </header>
+
+      <EntityContextPanel entityId={e.id} />
 
       <section aria-labelledby="state-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <h2 id="state-title" className="mb-1 font-semibold">

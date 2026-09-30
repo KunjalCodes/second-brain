@@ -19,10 +19,17 @@ from app.api.deps import (
     RATE_LIMIT_GRAPH,
     CurrentUser,
     GraphExplorationServiceDep,
+    GraphIntelligenceServiceDep,
 )
 from app.models.enums import EntityType
 from app.models.normalization import PREDICATE_PATTERN
 from app.schemas.graph import EdgeEvidence, GraphInclude, GraphSlice, TemporalScope
+from app.schemas.graph_intelligence import (
+    ContextRequest,
+    ContextSubgraph,
+    EdgeExplanation,
+    PathsResponse,
+)
 
 router = APIRouter(prefix="/graph", tags=["graph"], dependencies=[RATE_LIMIT_GRAPH])
 
@@ -34,7 +41,7 @@ MAX_PREDICATES = 20
 GraphId = Annotated[str, Path(pattern=ID_PATTERN)]
 Scope = Annotated[
     TemporalScope,
-    Query(description="current (default) | as_of (requires as_of) | all"),
+    Query(description="current (default) | as_of (requires as_of) | all | historical"),
 ]
 AsOf = Annotated[
     datetime | None,
@@ -161,3 +168,85 @@ async def graph_memory_timeline(
     service: GraphExplorationServiceDep,
 ) -> GraphSlice:
     return await service.memory_timeline(user_id=user_id, memory_id=memory_id)
+
+
+# -- Phase 15: graph intelligence ------------------------------------------------------
+
+
+@router.get(
+    "/paths",
+    response_model=PathsResponse,
+    summary="How two entities are connected: bounded shortest paths with evidence",
+)
+async def graph_paths(
+    user_id: CurrentUser,
+    service: GraphIntelligenceServiceDep,
+    source_entity_id: Annotated[str, Query(pattern=ID_PATTERN)],
+    target_entity_id: Annotated[str, Query(pattern=ID_PATTERN)],
+    max_hops: Annotated[int | None, Query(ge=1, description="Clamped to server cap")] = None,
+    max_paths: Annotated[int | None, Query(ge=1, description="Clamped to server cap")] = None,
+    temporal_scope: Scope = TemporalScope.CURRENT,
+    as_of: AsOf = None,
+    predicate: Annotated[
+        list[Annotated[str, Query(pattern=PREDICATE_PATTERN, max_length=100)]] | None,
+        Query(max_length=MAX_PREDICATES),
+    ] = None,
+) -> PathsResponse:
+    """Every step is a stored relationship with its asserting memories. A path
+    longer than one step is labelled `inferred_from_graph`: each step was
+    stated, the connection through intermediate entities was not."""
+    return await service.paths(
+        user_id=user_id,
+        source_entity_id=source_entity_id,
+        target_entity_id=target_entity_id,
+        max_hops=max_hops,
+        max_paths=max_paths,
+        temporal_scope=temporal_scope,
+        as_of=as_of,
+        predicates=predicate or [],
+    )
+
+
+@router.get(
+    "/edges/explain",
+    response_model=EdgeExplanation,
+    summary="Why a relationship exists, and why it is (or is no longer) current",
+)
+async def graph_edge_explain(
+    user_id: CurrentUser,
+    service: GraphIntelligenceServiceDep,
+    source_entity_id: Annotated[str, Query(pattern=ID_PATTERN)],
+    target_entity_id: Annotated[str, Query(pattern=ID_PATTERN)],
+    predicate: Annotated[str, Query(pattern=PREDICATE_PATTERN, max_length=100)],
+    temporal_scope: Scope = TemporalScope.CURRENT,
+    as_of: AsOf = None,
+) -> EdgeExplanation:
+    return await service.explain_edge(
+        user_id=user_id,
+        source_entity_id=source_entity_id,
+        target_entity_id=target_entity_id,
+        predicate=predicate,
+        temporal_scope=temporal_scope,
+        as_of=as_of,
+    )
+
+
+@router.post(
+    "/context",
+    response_model=ContextSubgraph,
+    summary="The smallest useful subgraph for a question, with evidence",
+)
+async def graph_context(
+    body: ContextRequest,
+    user_id: CurrentUser,
+    service: GraphIntelligenceServiceDep,
+) -> ContextSubgraph:
+    """A POST so the question never appears in a URL or access log."""
+    return await service.context_subgraph(
+        user_id=user_id,
+        query=body.query,
+        temporal_scope=body.temporal_scope,
+        as_of=body.as_of,
+        max_nodes=body.max_nodes,
+        max_evidence=body.max_evidence,
+    )

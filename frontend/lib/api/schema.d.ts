@@ -308,6 +308,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/entities/{entity_id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Everything bounded the memory knows about an entity, current and historical
+         * @description Phase 15 (M5): canonical entity (merge redirects followed), merged-from
+         *     entities, current and historical relationships, ranked related entities,
+         *     mentioning memories, conflicts, a validity timeline and source types --
+         *     every list bounded by the ENTITY_CONTEXT_* settings.
+         */
+        get: operations["get_entity_context_entities__entity_id__context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/entities/{entity_id}/graph": {
         parameters: {
             query?: never;
@@ -422,6 +445,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/graph/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The smallest useful subgraph for a question, with evidence
+         * @description A POST so the question never appears in a URL or access log.
+         */
+        post: operations["graph_context_graph_context_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/graph/edges/evidence": {
         parameters: {
             query?: never;
@@ -435,6 +478,23 @@ export interface paths {
          *     include superseded/historical assertions.
          */
         get: operations["graph_edge_evidence_graph_edges_evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/graph/edges/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Why a relationship exists, and why it is (or is no longer) current */
+        get: operations["graph_edge_explain_graph_edges_explain_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -494,6 +554,28 @@ export interface paths {
          *     then id), merged-away entities excluded, plus the in-scope edges among them.
          */
         get: operations["graph_overview_graph_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/graph/paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How two entities are connected: bounded shortest paths with evidence
+         * @description Every step is a stored relationship with its asserting memories. A path
+         *     longer than one step is labelled `inferred_from_graph`: each step was
+         *     stated, the connection through intermediate entities was not.
+         */
+        get: operations["graph_paths_graph_paths_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -692,6 +774,28 @@ export interface paths {
          *     `supersedes` names this one.
          */
         patch: operations["update_memory_memories__memory_id__patch"];
+        trace?: never;
+    };
+    "/memories/{memory_id}/evolution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How this knowledge evolved: new fact, supersessions, conflicts, merges
+         * @description Phase 15 (M6): the bounded history chain as typed events, oldest first,
+         *     each with its stored time and sources. Nothing is overwritten or implied:
+         *     every event is a stored memory, link, extraction decision or review.
+         */
+        get: operations["get_memory_evolution_memories__memory_id__evolution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/memories/{memory_id}/explanation": {
@@ -1033,6 +1137,105 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** ContextMemory */
+        ContextMemory: {
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Memory Id */
+            memory_id: string;
+            memory_type: components["schemas"]["MemoryType"];
+            /** Source Types */
+            source_types: string[];
+            status: components["schemas"]["MemoryStatus"];
+            temporal_state: components["schemas"]["TemporalState"];
+            /** Valid From */
+            valid_from: string | null;
+            /** Valid Until */
+            valid_until: string | null;
+        };
+        /** ContextRelationship */
+        ContextRelationship: {
+            /** Assertion Count */
+            assertion_count: number;
+            /** Confidence */
+            confidence: number | null;
+            /** Direction */
+            direction: string;
+            /** Memory Ids */
+            memory_ids: string[];
+            /** Other Entity Id */
+            other_entity_id: string;
+            other_entity_type: components["schemas"]["EntityType"];
+            /** Other Name */
+            other_name: string;
+            /** Predicate */
+            predicate: string;
+            relation_kind: components["schemas"]["RelationKind"];
+            status: components["schemas"]["MemoryStatus"];
+            temporal_state: components["schemas"]["TemporalState"];
+            /** Valid From */
+            valid_from: string | null;
+            /** Valid Until */
+            valid_until: string | null;
+        };
+        /** ContextRequest */
+        ContextRequest: {
+            /** As Of */
+            as_of?: string | null;
+            /** Max Evidence */
+            max_evidence?: number | null;
+            /** Max Nodes */
+            max_nodes?: number | null;
+            /** Query */
+            query: string;
+            temporal_scope?: components["schemas"]["TemporalScope"] | null;
+        };
+        /** ContextSubgraph */
+        ContextSubgraph: {
+            /** Anchors */
+            anchors: string[];
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Construction */
+            construction: {
+                [key: string]: number;
+            };
+            /** Edge Signals */
+            edge_signals: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** Edges */
+            edges: components["schemas"]["GraphSliceEdge"][];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceItem"][];
+            /** Max Nodes */
+            max_nodes: number;
+            /** Node Signals */
+            node_signals: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** Nodes */
+            nodes: components["schemas"]["GraphSliceNode"][];
+            /** Paths */
+            paths: components["schemas"]["GraphPath"][];
+            /** Temporal Intent */
+            temporal_intent: string;
+            temporal_scope: components["schemas"]["TemporalScope"] | null;
+            /** Truncated */
+            truncated: boolean;
+        };
         /** Conversation */
         Conversation: {
             /**
@@ -1224,6 +1427,40 @@ export interface components {
              */
             truncated: boolean;
         };
+        /** EdgeExplanation */
+        EdgeExplanation: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Assertion Count */
+            assertion_count: number;
+            /** Basis */
+            basis: components["schemas"]["EvidenceBasis"][];
+            /** Confidence */
+            confidence: number | null;
+            /** Predicate */
+            predicate: string;
+            relation_kind: components["schemas"]["RelationKind"];
+            /** Source Entity Id */
+            source_entity_id: string;
+            status: components["schemas"]["MemoryStatus"];
+            /** Supporting Memories */
+            supporting_memories: components["schemas"]["SupportingMemory"][];
+            /** Target Entity Id */
+            target_entity_id: string;
+            temporal_scope: components["schemas"]["TemporalScope"];
+            temporal_state: components["schemas"]["TemporalState"];
+            /** Truncated */
+            truncated: boolean;
+            /** Valid From */
+            valid_from: string | null;
+            /** Valid Until */
+            valid_until: string | null;
+            /** Why */
+            why: string;
+        };
         /**
          * EdgeKind
          * @enum {string}
@@ -1276,6 +1513,41 @@ export interface components {
             updated_at: string;
             /** User Id */
             user_id: string;
+        };
+        /** EntityContext */
+        EntityContext: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Conflicting Memory Total */
+            conflicting_memory_total: number;
+            /** Current Relationships */
+            current_relationships: components["schemas"]["ContextRelationship"][];
+            entity: components["schemas"]["Entity"];
+            /** Historical Relationships */
+            historical_relationships: components["schemas"]["ContextRelationship"][];
+            /** Memories */
+            memories: components["schemas"]["ContextMemory"][];
+            /** Memory Total */
+            memory_total: number;
+            /** Merged From */
+            merged_from: components["schemas"]["MergedEntityRef"][];
+            /** Related Entities */
+            related_entities: components["schemas"]["RelatedEntity"][];
+            /** Resolved From */
+            resolved_from: string | null;
+            /** Source Type Counts */
+            source_type_counts: {
+                [key: string]: number;
+            };
+            /** Timeline */
+            timeline: components["schemas"]["TimelineEvent"][];
+            /** Truncated Memories */
+            truncated_memories: boolean;
+            /** Truncated Relationships */
+            truncated_relationships: boolean;
         };
         /**
          * EntityDetail
@@ -1420,6 +1692,31 @@ export interface components {
             /** Valid Until */
             valid_until?: string | null;
         };
+        /**
+         * EvidenceBasis
+         * @enum {string}
+         */
+        EvidenceBasis: "directly_stated" | "supported_by_multiple_memories" | "inferred_from_graph" | "temporally_derived";
+        /** EvidenceItem */
+        EvidenceItem: {
+            /** Content */
+            content: string;
+            /** Memory Id */
+            memory_id: string;
+            /** Retrieved Via */
+            retrieved_via: string[];
+            /** Score */
+            score: number;
+            /** Signals */
+            signals: {
+                [key: string]: number;
+            };
+            /** Sources */
+            sources: components["schemas"]["SourceRef"][];
+            status: components["schemas"]["MemoryStatus"];
+            /** Temporal State */
+            temporal_state: string;
+        };
         /** EvidenceMemory */
         EvidenceMemory: {
             /** Confidence */
@@ -1480,6 +1777,31 @@ export interface components {
          * @enum {string}
          */
         EvidenceStatus: "available" | "no_asserting_memory" | "memory_not_found" | "memory_excluded" | "no_sources" | "sources_unresolved";
+        /** EvolutionEvent */
+        EvolutionEvent: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Content */
+            content: string;
+            /** Detail */
+            detail: string;
+            kind: components["schemas"]["EvolutionKind"];
+            /** Memory Id */
+            memory_id: string;
+            /** Related Memory Ids */
+            related_memory_ids: string[];
+            /** Sources */
+            sources: components["schemas"]["SourceRef"][];
+            status: components["schemas"]["MemoryStatus"];
+        };
+        /**
+         * EvolutionKind
+         * @enum {string}
+         */
+        EvolutionKind: "new_fact" | "supersession" | "conflict" | "conflict_resolved" | "invalidation" | "merge" | "reconfirmation";
         /**
          * ExtractionCandidateRecord
          * @description What the model proposed, and what the engine decided -- the audit row.
@@ -1687,6 +2009,22 @@ export interface components {
             entity: components["schemas"]["Entity"];
             /** Hops */
             hops: number;
+        };
+        /** GraphPath */
+        GraphPath: {
+            basis: components["schemas"]["EvidenceBasis"];
+            /** Entity Ids */
+            entity_ids: string[];
+            /** Length */
+            length: number;
+            /** Score */
+            score: number;
+            /** Signals */
+            signals: {
+                [key: string]: number;
+            };
+            /** Steps */
+            steps: components["schemas"]["PathStep"][];
         };
         /**
          * GraphSlice
@@ -1897,6 +2235,17 @@ export interface components {
             /** Supersedes */
             supersedes?: string[];
         };
+        /** MemoryEvolution */
+        MemoryEvolution: {
+            /** Current Memory Ids */
+            current_memory_ids: string[];
+            /** Events */
+            events: components["schemas"]["EvolutionEvent"][];
+            /** Memory Id */
+            memory_id: string;
+            /** Truncated */
+            truncated: boolean;
+        };
         /** MemoryExplanation */
         MemoryExplanation: {
             /**
@@ -2065,6 +2414,13 @@ export interface components {
             /** Valid Until */
             valid_until?: string | null;
         };
+        /** MergedEntityRef */
+        MergedEntityRef: {
+            /** Entity Id */
+            entity_id: string;
+            /** Name */
+            name: string;
+        };
         /** Message */
         Message: {
             /** Content */
@@ -2140,6 +2496,48 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /** PathStep */
+        PathStep: {
+            /** From Entity Id */
+            from_entity_id: string;
+            /** From Name */
+            from_name: string;
+            /** Relationships */
+            relationships: components["schemas"]["StepRelationship"][];
+            /** To Entity Id */
+            to_entity_id: string;
+            /** To Name */
+            to_name: string;
+        };
+        /** PathsResponse */
+        PathsResponse: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Explored Nodes */
+            explored_nodes: number;
+            /** Max Hops */
+            max_hops: number;
+            /** Max Paths */
+            max_paths: number;
+            /** Paths */
+            paths: components["schemas"]["GraphPath"][];
+            /** Reason */
+            reason: string | null;
+            /** Source Entity Id */
+            source_entity_id: string;
+            /** Source Resolved From */
+            source_resolved_from: string | null;
+            /** Target Entity Id */
+            target_entity_id: string;
+            /** Target Resolved From */
+            target_resolved_from: string | null;
+            temporal_scope: components["schemas"]["TemporalScope"];
+            /** Truncated */
+            truncated: boolean;
+        };
         /**
          * ProvenanceView
          * @description Answers "why does the system believe this?" -- Memory -> Source -> Message.
@@ -2167,6 +2565,29 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** RelatedEntity */
+        RelatedEntity: {
+            /** Entity Id */
+            entity_id: string;
+            entity_type: components["schemas"]["EntityType"];
+            /** Name */
+            name: string;
+            /** Predicates */
+            predicates: string[];
+            /** Score */
+            score: number;
+            /** Signals */
+            signals: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * RelationKind
+         * @description What a predicate asserts (Phase 15, M7). Decided by the predicate the
+         *     memory STATED -- never inferred from timing or co-occurrence.
+         * @enum {string}
+         */
+        RelationKind: "causal" | "possible_cause" | "association";
         /**
          * Relationship
          * @description A temporally-scoped edge between two entities.
@@ -2433,12 +2854,70 @@ export interface components {
             resolved?: boolean | null;
             source: components["schemas"]["Source"];
         };
+        /** SourceRef */
+        SourceRef: {
+            /** Location */
+            location: string | null;
+            /** Reference */
+            reference: string | null;
+            /** Resolved */
+            resolved: boolean | null;
+            source_type: components["schemas"]["SourceType"];
+        };
         /**
          * SourceType
          * @description Provenance kinds (CLAUDE.md section 16).
          * @enum {string}
          */
         SourceType: "conversation" | "message" | "document" | "url" | "tool_result" | "user_statement" | "system_inference";
+        /**
+         * StepRelationship
+         * @description One stored relationship between two adjacent path entities.
+         */
+        StepRelationship: {
+            /** Assertion Count */
+            assertion_count: number;
+            /** Basis */
+            basis: components["schemas"]["EvidenceBasis"][];
+            /** Confidence */
+            confidence: number | null;
+            /** Direction */
+            direction: string;
+            /** Memory Ids */
+            memory_ids: string[];
+            /** Predicate */
+            predicate: string;
+            relation_kind: components["schemas"]["RelationKind"];
+            status: components["schemas"]["MemoryStatus"];
+            temporal_state: components["schemas"]["TemporalState"];
+            /** Valid From */
+            valid_from: string | null;
+            /** Valid Until */
+            valid_until: string | null;
+        };
+        /** SupportingMemory */
+        SupportingMemory: {
+            /** Conflicts With */
+            conflicts_with: string[];
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Memory Id */
+            memory_id: string;
+            /** Sources */
+            sources: components["schemas"]["SourceRef"][];
+            status: components["schemas"]["MemoryStatus"];
+            /** Superseded By */
+            superseded_by: string[];
+            /** Valid From */
+            valid_from: string | null;
+            /** Valid Until */
+            valid_until: string | null;
+        };
         /**
          * SweepResult
          * @description Counts from one sweep tick (docs/adr/0008) -- observability, not an audit log.
@@ -2463,15 +2942,31 @@ export interface components {
          *     AS_OF    any non-excluded status AND window contains the explicit `as_of`
          *     ALL      any non-excluded status, regardless of window; each element is
          *              labelled with its `temporal_state` relative to the slice's `as_of`
+         *     HISTORICAL  only facts no longer true at the reference instant (Phase 15)
          * @enum {string}
          */
-        TemporalScope: "current" | "as_of" | "all";
+        TemporalScope: "current" | "as_of" | "all" | "historical";
         /**
          * TemporalState
          * @description Where an element's validity window sits relative to an instant.
          * @enum {string}
          */
         TemporalState: "current" | "historical" | "not_yet_valid";
+        /** TimelineEvent */
+        TimelineEvent: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Content */
+            content: string;
+            /** Kind */
+            kind: string;
+            /** Memory Id */
+            memory_id: string;
+            status: components["schemas"]["MemoryStatus"];
+        };
         /** UserView */
         UserView: {
             /** Created At */
@@ -3083,6 +3578,40 @@ export interface operations {
             };
         };
     };
+    get_entity_context_entities__entity_id__context_get: {
+        parameters: {
+            query?: {
+                /** @description Reference instant for current vs historical */
+                as_of?: string | null;
+            };
+            header?: never;
+            path: {
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_entity_graph_entities__entity_id__graph_get: {
         parameters: {
             query?: {
@@ -3285,13 +3814,46 @@ export interface operations {
             };
         };
     };
+    graph_context_graph_context_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContextRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextSubgraph"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     graph_edge_evidence_graph_edges_evidence_get: {
         parameters: {
             query: {
                 source_entity_id: string;
                 target_entity_id: string;
                 predicate: string;
-                /** @description current (default) | as_of (requires as_of) | all */
+                /** @description current (default) | as_of (requires as_of) | all | historical */
                 temporal_scope?: components["schemas"]["TemporalScope"];
                 /** @description Required iff temporal_scope=as_of; with all, moves the labelling instant */
                 as_of?: string | null;
@@ -3324,6 +3886,43 @@ export interface operations {
             };
         };
     };
+    graph_edge_explain_graph_edges_explain_get: {
+        parameters: {
+            query: {
+                source_entity_id: string;
+                target_entity_id: string;
+                predicate: string;
+                /** @description current (default) | as_of (requires as_of) | all | historical */
+                temporal_scope?: components["schemas"]["TemporalScope"];
+                /** @description Required iff temporal_scope=as_of; with all, moves the labelling instant */
+                as_of?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EdgeExplanation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     graph_neighborhood_graph_entities__entity_id__neighborhood_get: {
         parameters: {
             query?: {
@@ -3333,7 +3932,7 @@ export interface operations {
                 max_nodes?: number | null;
                 /** @description Clamped to GRAPH_EXPLORE_MAX_EDGES */
                 max_edges?: number | null;
-                /** @description current (default) | as_of (requires as_of) | all */
+                /** @description current (default) | as_of (requires as_of) | all | historical */
                 temporal_scope?: components["schemas"]["TemporalScope"];
                 /** @description Required iff temporal_scope=as_of; with all, moves the labelling instant */
                 as_of?: string | null;
@@ -3412,7 +4011,7 @@ export interface operations {
                 limit?: number | null;
                 /** @description Clamped to GRAPH_EXPLORE_MAX_EDGES */
                 max_edges?: number | null;
-                /** @description current (default) | as_of (requires as_of) | all */
+                /** @description current (default) | as_of (requires as_of) | all | historical */
                 temporal_scope?: components["schemas"]["TemporalScope"];
                 /** @description Required iff temporal_scope=as_of; with all, moves the labelling instant */
                 as_of?: string | null;
@@ -3434,6 +4033,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GraphSlice"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_paths_graph_paths_get: {
+        parameters: {
+            query: {
+                source_entity_id: string;
+                target_entity_id: string;
+                /** @description Clamped to server cap */
+                max_hops?: number | null;
+                /** @description Clamped to server cap */
+                max_paths?: number | null;
+                /** @description current (default) | as_of (requires as_of) | all | historical */
+                temporal_scope?: components["schemas"]["TemporalScope"];
+                /** @description Required iff temporal_scope=as_of; with all, moves the labelling instant */
+                as_of?: string | null;
+                predicate?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PathsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3751,6 +4391,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Memory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_memory_evolution_memories__memory_id__evolution_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEvolution"];
                 };
             };
             /** @description Validation Error */

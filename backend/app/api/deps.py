@@ -43,6 +43,7 @@ from app.services.conversation_service import ConversationService
 from app.services.document_service import DocumentService
 from app.services.extraction_status_service import ExtractionStatusService
 from app.services.graph_exploration_service import GraphExplorationService
+from app.services.graph_intelligence_service import GraphIntelligenceService
 from app.services.hybrid_retrieval_service import HybridRetrievalService
 from app.services.memory_explanation_service import MemoryExplanationService
 from app.services.memory_service import MemoryService
@@ -268,6 +269,33 @@ def get_graph_exploration_service(
     )
 
 
+def get_graph_intelligence_service(
+    client: Annotated[GraphClient, Depends(get_client)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
+    memory_service: Annotated[MemoryService, Depends(get_memory_service)],
+    provenance_service: Annotated[ProvenanceService, Depends(get_provenance_service)],
+    embedding_client: Annotated[EmbeddingClient, Depends(get_embeddings)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> GraphIntelligenceService:
+    hybrid = HybridRetrievalService(
+        session=session,
+        memory_service=memory_service,
+        retrieval_service=retrieval_service,
+        embedding_client=embedding_client,
+        settings=settings,
+    )
+    return GraphIntelligenceService(
+        repository=GraphRepository(client),
+        retrieval=retrieval_service,
+        memory=memory_service,
+        provenance=provenance_service,
+        session=session,
+        settings=settings,
+        hybrid=hybrid,
+    )
+
+
 def get_hybrid_retrieval_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     memory_service: Annotated[MemoryService, Depends(get_memory_service)],
@@ -389,6 +417,9 @@ ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 DocumentStorageDep = Annotated[DocumentStorage, Depends(get_storage)]
 ProvenanceServiceDep = Annotated[ProvenanceService, Depends(get_provenance_service)]
+GraphIntelligenceServiceDep = Annotated[
+    GraphIntelligenceService, Depends(get_graph_intelligence_service)
+]
 MemoryExplanationServiceDep = Annotated[
     MemoryExplanationService, Depends(get_memory_explanation_service)
 ]

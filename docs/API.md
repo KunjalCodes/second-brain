@@ -1079,6 +1079,7 @@ every hop**, never after a limit.
 | `current` (**default**, D3) | status `active` or `conflicting`, and window contains now | must be omitted (422 otherwise) |
 | `as_of` | any status except `invalid`/`archived`/`merged`, window contains `as_of` | **required** |
 | `all` | any status except `invalid`/`archived`/`merged`, regardless of window | optional: moves the instant `temporal_state` is computed against (default now) |
+| `historical` (Phase 15) | only what is **no longer true** at the reference instant: window closed at or before it, or status other than `active`/`conflicting` (superseded, historical); excluded statuses stay excluded | optional: the reference instant (default now) |
 
 `temporal_state` on every edge and memory node is `current`, `historical`
 (the window closed at or before `as_of`) or `not_yet_valid` (the window
@@ -1239,6 +1240,138 @@ additionally follows `conflicts_with`. It is bounded at 20 memories, and
 or naive, a malformed id, predicate, entity type or `include` value, too many
 `exclude_ids` or predicates). 404 for an unknown or other-user id. Mutating
 methods return 405.
+
+---
+
+# 4d. Graph intelligence API (Phase 15)
+
+Bounded, read-only, **user-scoped** projections over the same graph. Nothing is
+stored: every response is assembled from stored memories, relationships,
+sources and review/extraction records. Design and heuristics:
+`docs/PHASE15_GRAPH_INTELLIGENCE.md`.
+
+**Rules that hold for every endpoint below:**
+- An unknown or other-user id returns **404**.
+- Caps a client may lower but never raise: 
+  - `GRAPH_PATH_MAX_HOPS` (3, hard 4);
+  - `GRAPH_PATH_MAX_PATHS` (5, hard 20);
+  - `GRAPH_CONTEXT_MAX_NODES` (25, hard 60);
+  - `GRAPH_CONTEXT_MAX_EVIDENCE` (8, hard 20);
+  - `ENTITY_CONTEXT_MAX_RELATIONSHIPS` (25, hard 100);
+  - `ENTITY_CONTEXT_MAX_RELATED` (10, hard 50);
+  - `ENTITY_CONTEXT_MAX_MEMORIES` (10, hard 50).
+
+  Path search also stays inside `GRAPH_EXPLORE_MAX_NODES`.
+- All are rate limited under the `graph` class.
+- Scores are **heuristic** and always returned with the signals they came from.
+
+**What a relationship "kind" and "basis" mean:**
+
+| Field | Values | Meaning |
+|---|---|---|
+| `relation_kind` | `causal` | The stored predicate itself states a cause or consequence (`led_to`, `caused`, `fixed_by`, `resulted_in`, ...) |
+| | `possible_cause` | Stated as uncertain (`possible_cause`, `may_have_caused`, ...) |
+| | `association` | Everything else. **Sequence in time never makes a relationship causal** |
+| `basis` | `directly_stated` | At least one stored memory asserts it |
+| | `supported_by_multiple_memories` | More than one does |
+| | `inferred_from_graph` | A **multi-step** connection: each step was stated, the connection was not |
+| | `temporally_derived` | Included only because of the requested time scope; not true now |
+
+## `GET /graph/paths`
+
+How two entities connect: shortest paths, each step a stored relationship.
+
+| Parameter | Notes |
+|---|---|
+| `source_entity_id`, `target_entity_id` | required; merged-away ids resolve to the canonical entity (`*_resolved_from` reports the original) |
+| `max_hops`, `max_paths` | optional; clamped to the caps above |
+| `temporal_scope`, `as_of` | as in section 4c, including `historical` |
+| `predicate` | repeatable filter (at most 20) |
+
+The search is bidirectional and breadth-first, one bounded query per layer,
+expanding the cheaper side (smaller total degree). Every visited entity counts
+against `GRAPH_EXPLORE_MAX_NODES`. `paths` is `[]` with a `reason`:
+`same_entity`, `not_connected_within_hops` (the search space was fully explored
+or the hop limit was reached) or `node_budget_exhausted` (**not** proof that no
+connection exists).
+
+```jsonc
+{"paths": [{"entity_ids": ["a", "b", "c"], "length": 2, "basis": "inferred_from_graph",
+  "steps": [{"from_name": "Atlas", "to_name": "FastAPI", "relationships": [{
+     "predicate": "uses", "direction": "forward", "relation_kind": "association",
+     "status": "active", "temporal_state": "current", "assertion_count": 1,
+     "confidence": 0.9, "memory_ids": ["..."], "basis": ["directly_stated"]}]}],
+  "signals": {"length": 2, "min_support": 1, "current_fraction": 1.0, "min_confidence": 0.9},
+  "score": 0.6}],
+ "reason": null, "explored_nodes": 7, "truncated": false, "max_hops": 3, "max_paths": 5}
+```
+
+`direction` is `forward` when the stored edge runs from the path's earlier
+entity to the later one, `backward` otherwise. Score:
+`0.4/length + 0.2·min(support,3)/3 + 0.25·current_fraction + 0.15·min_confidence`.
+
+## `GET /graph/edges/explain`
+
+Why a relationship exists, and whether it is current. Parameters as
+`/graph/edges/evidence`. `404` when no such relationship exists in the chosen
+time scope (an ended relationship needs `temporal_scope=all` or `historical`).
+The `why` sentence is built only from the stored window, status and links, for
+example `No longer true: stated by 1 memory, ended 2026-05-01 (status
+superseded); replaced by 1 later memory.` `supporting_memories` carry their
+resolved sources (with the Phase 14 `resolved` flag).
+
+## `GET /entities/{id}/context`
+
+One bounded view of everything the memory knows about an entity. `as_of`
+optional. Returns the canonical entity (`resolved_from` when a merge redirect
+was followed), `merged_from` (names merged into it), `current_relationships`
+and `historical_relationships` (each with `relation_kind`), `related_entities`
+(ranked; `signals` + `score`), `memories` with `memory_total` and
+`conflicting_memory_total`, a `timeline` of when facts began and ended, and
+`truncated_*` flags. Related-entity score:
+`0.5·current + 0.35·support + 0.15·relation_variety`.
+
+## `GET /memories/{id}/evolution`
+
+The memory's bounded history chain as typed, chronologically ordered events:
+
+| Event `kind` | Comes from |
+|---|---|
+| `new_fact` | a chain member that replaced/merged nothing and disputes nothing |
+| `supersession` | a `SUPERSEDES` link |
+| `conflict` | `CONFLICTS_WITH` or status `conflicting` |
+| `conflict_resolved` | a review decision recorded in the audit log |
+| `invalidation` | status `invalid`, with its stored reason |
+| `merge` | a confirmed `DUPLICATE_OF` |
+| `reconfirmation` | a later extraction decision `DUPLICATE`/`UPDATE` naming this memory |
+
+There is **no separate `correction` kind**: the stored model has no marker
+that distinguishes a correction from any other supersession.
+`current_memory_ids` are the chain members believed and valid now.
+
+## `POST /graph/context`
+
+The smallest useful subgraph for a question. A POST so the question is never
+in a URL or access log.
+
+```jsonc
+{"query": "How is Cutlist Optimizer related to PaddleOCR?",
+ "temporal_scope": null,   // null: detected from the query text (Phase 14 rules)
+ "as_of": null, "max_nodes": null, "max_evidence": null}
+```
+
+Construction: hybrid retrieval finds evidence memories; **anchors** are the
+entities the query names (by name or alias, resolved through merges); entities
+come from anchors and from evidence that matched on content (a keyword match,
+or a vector match with similarity ≥ `GRAPH_CONTEXT_MIN_VECTOR_SIMILARITY`); a
+stored relationship is kept only if a contributing memory asserts it or it lies
+on a shortest path between anchors. Neighbouring relationships nothing in the
+evidence asserts are dropped. The response carries `anchors`, `nodes`, `edges`,
+`paths`, per-node and per-edge `signals` with `score`, the full `evidence`
+list (nothing retrieved is hidden), and `construction` counts.
+
+**Errors (all five):** 404 unknown/foreign id (context returns an empty result
+for a query that names nothing the caller owns), 422 invalid parameters.
 
 ---
 

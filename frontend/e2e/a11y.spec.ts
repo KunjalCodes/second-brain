@@ -26,6 +26,38 @@ test.describe("signed in", () => {
     expect(r.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => v.id)).toEqual([]);
   });
 
+  const serious = (r: Awaited<ReturnType<AxeBuilder["analyze"]>>) =>
+    r.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.nodes[0]?.target}`);
+
+  test("entity page (with the Phase 15 context panel) has no serious accessibility violations", async ({ page }) => {
+    // Not `networkidle`: the layout's navigation prefetches can stay pending
+    // indefinitely. Wait for the data this test is about instead.
+    const loaded = page.waitForResponse((r) => /\/api\/entities\/[^/]+\/context/.test(r.url()) && r.ok());
+    await page.goto(`/entities/${seed().entities.drawing_extractor}`);
+    await loaded;
+    await expect(page.getByRole("region", { name: "At a glance" })).toBeVisible();
+    await expect(page.getByText("Loading context")).toHaveCount(0);
+    expect(serious(await new AxeBuilder({ page }).analyze())).toEqual([]);
+  });
+
+  test("graph with the new filters, explanation and path panels has no serious accessibility violations", async ({ page }) => {
+    await page.goto(`/graph?focus=${seed().entities.drawing_extractor}`);
+    const toggle = page.getByRole("button", { name: /List view|Canvas view/ });
+    if ((await toggle.textContent()) === "List view") await toggle.click();
+    await page.getByLabel("Include no-longer-true facts (labelled)").check();
+    await page.getByRole("button", { name: /Drawing Extractor —uses→ EasyOCR/ }).click();
+    await expect(page.getByRole("region", { name: "Why this relationship exists" })).toBeVisible();
+    await expect(page.getByText(/^No longer true:/)).toBeVisible();
+    expect(serious(await new AxeBuilder({ page }).analyze())).toEqual([]);
+
+    await page.getByRole("button", { name: "PaddleOCR", exact: true }).click();
+    await page.getByRole("button", { name: "Find path to…" }).click();
+    await page.getByPlaceholder(/Connect to which entity/).fill("Gemini");
+    await page.getByRole("complementary", { name: "Selection details" }).getByRole("button", { name: /Gemini/ }).click();
+    await expect(page.getByRole("region", { name: "Path between entities" })).toBeVisible();
+    expect(serious(await new AxeBuilder({ page }).analyze())).toEqual([]);
+  });
+
   test("keyboard: the skip link is first and moves focus to the content", async ({ page }) => {
     await page.goto("/memories");
     await expect(page.getByRole("heading", { name: "Memories" })).toBeVisible();

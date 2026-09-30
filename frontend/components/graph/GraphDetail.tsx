@@ -7,6 +7,7 @@ import { MemoryStatusChip, TemporalStateChip } from "@/components/ui/StatusChips
 import { Tag } from "@/components/ui/Chip";
 import { Button } from "@/components/ui/Button";
 import { EvidencePanel } from "./EvidencePanel";
+import { ExplainPanel } from "./ExplainPanel";
 
 const EDGE_KIND_TEXT: Record<string, string> = {
   mentions: "This memory mentions this entity.",
@@ -21,11 +22,17 @@ export function NodeDetail({
   onExpand,
   onReroot,
   expandDisabled,
+  onFindPath,
+  onCollapse,
 }: {
   node: GraphSliceNode;
   onExpand: () => void;
   onReroot: () => void;
   expandDisabled: boolean;
+  /** Phase 15: ask how this entity connects to another. */
+  onFindPath?: () => void;
+  /** Phase 15: undo this node's expansion (only offered when it has one). */
+  onCollapse?: () => void;
 }) {
   if (node.kind === "memory") {
     return (
@@ -54,6 +61,8 @@ export function NodeDetail({
       <div className="flex flex-wrap gap-2">
         <Button onClick={onExpand} disabled={expandDisabled}>Expand neighbours</Button>
         <Button onClick={onReroot}>Focus here (re-root)</Button>
+        {onFindPath ? <Button onClick={onFindPath}>Find path to…</Button> : null}
+        {onCollapse ? <Button onClick={onCollapse}>Collapse neighbours</Button> : null}
       </div>
       <Link className="underline" href={`/entities/${node.id}`}>Open entity page →</Link>
     </div>
@@ -95,6 +104,9 @@ export function EdgeDetail({
           <p className="text-xs text-[var(--color-fg-muted)]">
             {validityText(edge.valid_from, edge.valid_until)} (earliest start / latest end among the aggregated assertions)
           </p>
+          {edge.predicate ? (
+            <ExplainPanel source={edge.source} target={edge.target} predicate={edge.predicate} scope={scope} />
+          ) : null}
           {edge.predicate ? <EvidencePanel edge={edge} scope={scope} /> : null}
         </>
       ) : (

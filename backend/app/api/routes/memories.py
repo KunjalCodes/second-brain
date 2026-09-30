@@ -12,10 +12,12 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Query, status
 
 from app.api.deps import (
+    RATE_LIMIT_GRAPH,
     RATE_LIMIT_SEARCH,
     RATE_LIMIT_WRITE,
     CurrentUser,
     EmbeddingClientDep,
+    GraphIntelligenceServiceDep,
     MemoryExplanationServiceDep,
     MemoryServiceDep,
     ProvenanceServiceDep,
@@ -27,6 +29,7 @@ from app.embeddings.base import EmbeddingClient
 from app.models.domain import Memory, MemoryDetail
 from app.models.enums import MemoryStatus, MemoryType
 from app.schemas.explanation import MemoryExplanation
+from app.schemas.graph_intelligence import MemoryEvolution
 from app.schemas.memory import (
     MemoryCreate,
     MemoryInvalidate,
@@ -184,6 +187,23 @@ async def get_memory_explanation(
     its resolved sources, relationships, supersede/conflict/duplicate links and
     review items -- all from stored records, nothing generated."""
     return await service.explain(user_id=user_id, memory_id=memory_id)
+
+
+@router.get(
+    "/{memory_id}/evolution",
+    response_model=MemoryEvolution,
+    summary="How this knowledge evolved: new fact, supersessions, conflicts, merges",
+    dependencies=[RATE_LIMIT_GRAPH],
+)
+async def get_memory_evolution(
+    memory_id: str,
+    user_id: CurrentUser,
+    service: GraphIntelligenceServiceDep,
+) -> MemoryEvolution:
+    """Phase 15 (M6): the bounded history chain as typed events, oldest first,
+    each with its stored time and sources. Nothing is overwritten or implied:
+    every event is a stored memory, link, extraction decision or review."""
+    return await service.memory_evolution(user_id=user_id, memory_id=memory_id)
 
 
 @router.patch(

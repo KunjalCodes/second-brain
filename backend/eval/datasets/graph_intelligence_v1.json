@@ -1,0 +1,989 @@
+{
+  "description": "Phase 15 graph-intelligence evaluation (eval/graph_intelligence_runner.py). One synthetic 'world' per run (user A) plus a second user (B) for isolation. Memories are created directly with fixed dates (day offsets from 2024-01-01); nothing depends on an LLM.",
+  "now": "2026-06-01T00:00:00+00:00",
+  "world": [
+    {
+      "key": "kunjal_acme",
+      "day": 0,
+      "content": "Kunjal works at Acme Corp.",
+      "entities": [
+        [
+          "Kunjal",
+          "person"
+        ],
+        [
+          "Acme Corp",
+          "company"
+        ]
+      ],
+      "rels": [
+        [
+          "Kunjal",
+          "works_at",
+          "Acme Corp"
+        ]
+      ]
+    },
+    {
+      "key": "kunjal_globex",
+      "day": 425,
+      "content": "Kunjal moved to Globex.",
+      "entities": [
+        [
+          "Kunjal",
+          "person"
+        ],
+        [
+          "Globex",
+          "company"
+        ]
+      ],
+      "rels": [
+        [
+          "Kunjal",
+          "works_at",
+          "Globex"
+        ]
+      ],
+      "supersedes": "kunjal_acme"
+    },
+    {
+      "key": "kunjal_atlas",
+      "day": 430,
+      "content": "Kunjal works on Atlas.",
+      "entities": [
+        [
+          "Kunjal",
+          "person"
+        ],
+        [
+          "Atlas",
+          "project"
+        ]
+      ],
+      "rels": [
+        [
+          "Kunjal",
+          "works_on",
+          "Atlas"
+        ]
+      ]
+    },
+    {
+      "key": "atlas_fastapi",
+      "day": 431,
+      "content": "Atlas is built with FastAPI.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "FastAPI",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "uses",
+          "FastAPI"
+        ]
+      ]
+    },
+    {
+      "key": "fastapi_pydantic",
+      "day": 432,
+      "content": "FastAPI depends on Pydantic.",
+      "entities": [
+        [
+          "FastAPI",
+          "technology"
+        ],
+        [
+          "Pydantic",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "FastAPI",
+          "depends_on",
+          "Pydantic"
+        ]
+      ]
+    },
+    {
+      "key": "fastapi_python",
+      "day": 433,
+      "content": "FastAPI is implemented with Python.",
+      "entities": [
+        [
+          "FastAPI",
+          "technology"
+        ],
+        [
+          "Python",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "FastAPI",
+          "implemented_with",
+          "Python"
+        ]
+      ]
+    },
+    {
+      "key": "atlas_pg",
+      "day": 434,
+      "content": "Atlas stores its data in PostgreSQL.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "PostgreSQL",
+          "technology",
+          [
+            "PG"
+          ]
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "uses",
+          "PostgreSQL"
+        ]
+      ]
+    },
+    {
+      "key": "atlas_redis",
+      "day": 435,
+      "content": "Atlas uses Redis for caching.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "Redis",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "uses",
+          "Redis"
+        ]
+      ]
+    },
+    {
+      "key": "atlas_redis_again",
+      "day": 500,
+      "content": "Atlas caches sessions in Redis.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "Redis",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "uses",
+          "Redis"
+        ]
+      ]
+    },
+    {
+      "key": "de_easyocr",
+      "day": 10,
+      "content": "Drawing Extractor uses EasyOCR.",
+      "entities": [
+        [
+          "Drawing Extractor",
+          "project"
+        ],
+        [
+          "EasyOCR",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Drawing Extractor",
+          "uses",
+          "EasyOCR"
+        ]
+      ]
+    },
+    {
+      "key": "de_paddle",
+      "day": 400,
+      "content": "Drawing Extractor switched to PaddleOCR.",
+      "entities": [
+        [
+          "Drawing Extractor",
+          "project"
+        ],
+        [
+          "PaddleOCR",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Drawing Extractor",
+          "uses",
+          "PaddleOCR"
+        ]
+      ],
+      "supersedes": "de_easyocr"
+    },
+    {
+      "key": "cutlist_de",
+      "day": 401,
+      "content": "Cutlist Optimizer depends on Drawing Extractor.",
+      "entities": [
+        [
+          "Cutlist Optimizer",
+          "project"
+        ],
+        [
+          "Drawing Extractor",
+          "project"
+        ]
+      ],
+      "rels": [
+        [
+          "Cutlist Optimizer",
+          "depends_on",
+          "Drawing Extractor"
+        ]
+      ]
+    },
+    {
+      "key": "decision_made_for",
+      "day": 399,
+      "content": "The decision to adopt PaddleOCR was made for Drawing Extractor.",
+      "entities": [
+        [
+          "Adopt PaddleOCR",
+          "decision"
+        ],
+        [
+          "Drawing Extractor",
+          "project"
+        ]
+      ],
+      "rels": [
+        [
+          "Adopt PaddleOCR",
+          "made_for",
+          "Drawing Extractor"
+        ]
+      ]
+    },
+    {
+      "key": "decision_led_to",
+      "day": 402,
+      "content": "Adopting PaddleOCR led to the rotated-label fix.",
+      "entities": [
+        [
+          "Adopt PaddleOCR",
+          "decision"
+        ],
+        [
+          "Rotated-label fix",
+          "event"
+        ]
+      ],
+      "rels": [
+        [
+          "Adopt PaddleOCR",
+          "led_to",
+          "Rotated-label fix"
+        ]
+      ]
+    },
+    {
+      "key": "bug_fixed_by",
+      "day": 403,
+      "content": "The OCR accuracy bug was fixed by the rotated-label fix.",
+      "entities": [
+        [
+          "OCR accuracy bug",
+          "event"
+        ],
+        [
+          "Rotated-label fix",
+          "event"
+        ]
+      ],
+      "rels": [
+        [
+          "OCR accuracy bug",
+          "fixed_by",
+          "Rotated-label fix"
+        ]
+      ]
+    },
+    {
+      "key": "bug_possible_cause",
+      "day": 390,
+      "content": "EasyOCR may have caused the OCR accuracy bug.",
+      "entities": [
+        [
+          "EasyOCR",
+          "technology"
+        ],
+        [
+          "OCR accuracy bug",
+          "event"
+        ]
+      ],
+      "rels": [
+        [
+          "EasyOCR",
+          "possible_cause",
+          "OCR accuracy bug"
+        ]
+      ]
+    },
+    {
+      "key": "ci_outage",
+      "day": 450,
+      "content": "A CI outage affected Atlas.",
+      "entities": [
+        [
+          "CI outage",
+          "event"
+        ],
+        [
+          "Atlas",
+          "project"
+        ]
+      ],
+      "rels": [
+        [
+          "CI outage",
+          "affected",
+          "Atlas"
+        ]
+      ]
+    },
+    {
+      "key": "deploy_freeze",
+      "day": 451,
+      "content": "A deploy freeze was announced for Atlas.",
+      "entities": [
+        [
+          "Deploy freeze",
+          "event"
+        ],
+        [
+          "Atlas",
+          "project"
+        ]
+      ],
+      "rels": [
+        [
+          "Deploy freeze",
+          "applies_to",
+          "Atlas"
+        ]
+      ]
+    },
+    {
+      "key": "atlas_render",
+      "day": 436,
+      "content": "Atlas is hosted on Render.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "Render",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "hosted_on",
+          "Render"
+        ]
+      ]
+    },
+    {
+      "key": "atlas_fly",
+      "day": 437,
+      "content": "Atlas is hosted on Fly.io.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "Fly.io",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "hosted_on",
+          "Fly.io"
+        ]
+      ],
+      "status": "conflicting",
+      "conflicts_with": "atlas_render"
+    },
+    {
+      "key": "atlas_openai",
+      "day": 438,
+      "content": "Atlas uses OpenAI embeddings.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "OpenAI",
+          "company"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "uses",
+          "OpenAI"
+        ]
+      ]
+    },
+    {
+      "key": "atlas_open_ai",
+      "day": 439,
+      "content": "Atlas was evaluated against Open AI models.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "Open AI",
+          "company"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "evaluated_against",
+          "Open AI"
+        ]
+      ]
+    },
+    {
+      "key": "lonely",
+      "day": 440,
+      "content": "Lonely Tool renders diagrams.",
+      "entities": [
+        [
+          "Lonely Tool",
+          "technology"
+        ]
+      ],
+      "rels": []
+    }
+  ],
+  "merge": {
+    "canonical": "OpenAI",
+    "merged": "Open AI"
+  },
+  "hub": {
+    "name": "Perf Hub",
+    "spokes": 200
+  },
+  "other_user_world": [
+    {
+      "key": "b_atlas",
+      "day": 5,
+      "content": "Atlas uses MySQL.",
+      "entities": [
+        [
+          "Atlas",
+          "project"
+        ],
+        [
+          "MySQL",
+          "technology"
+        ]
+      ],
+      "rels": [
+        [
+          "Atlas",
+          "uses",
+          "MySQL"
+        ]
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "A1_direct_relationship",
+      "category": "A_direct",
+      "op": "path",
+      "from": "Atlas",
+      "to": "PostgreSQL",
+      "expect": {
+        "length": 1,
+        "names": [
+          "Atlas",
+          "PostgreSQL"
+        ],
+        "basis": "directly_stated",
+        "predicates": [
+          [
+            "uses"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "B1_three_hop_path",
+      "category": "B_multi_hop",
+      "op": "path",
+      "from": "Kunjal",
+      "to": "Pydantic",
+      "expect": {
+        "length": 3,
+        "names": [
+          "Kunjal",
+          "Atlas",
+          "FastAPI",
+          "Pydantic"
+        ],
+        "basis": "inferred_from_graph",
+        "predicates": [
+          [
+            "works_on"
+          ],
+          [
+            "uses"
+          ],
+          [
+            "depends_on"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "B2_two_hop_why_python",
+      "category": "B_multi_hop",
+      "op": "path",
+      "from": "Atlas",
+      "to": "Python",
+      "expect": {
+        "length": 2,
+        "names": [
+          "Atlas",
+          "FastAPI",
+          "Python"
+        ],
+        "basis": "inferred_from_graph"
+      }
+    },
+    {
+      "id": "B3_hop_limit_respected",
+      "category": "B_multi_hop",
+      "op": "path",
+      "from": "Kunjal",
+      "to": "Pydantic",
+      "max_hops": 2,
+      "expect": {
+        "length": null,
+        "reason": "not_connected_within_hops"
+      }
+    },
+    {
+      "id": "C1_current_employer",
+      "category": "C_temporal",
+      "op": "neighborhood",
+      "entity": "Kunjal",
+      "scope": "current",
+      "expect": {
+        "present": [
+          [
+            "works_at",
+            "Globex"
+          ]
+        ],
+        "absent": [
+          [
+            "works_at",
+            "Acme Corp"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "D1_historical_employer",
+      "category": "D_historical",
+      "op": "neighborhood",
+      "entity": "Kunjal",
+      "scope": "historical",
+      "expect": {
+        "present": [
+          [
+            "works_at",
+            "Acme Corp"
+          ]
+        ],
+        "absent": [
+          [
+            "works_at",
+            "Globex"
+          ],
+          [
+            "works_on",
+            "Atlas"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "O1_as_of_employer",
+      "category": "O_as_of",
+      "op": "neighborhood",
+      "entity": "Kunjal",
+      "scope": "as_of",
+      "as_of": "2024-06-01T00:00:00+00:00",
+      "expect": {
+        "present": [
+          [
+            "works_at",
+            "Acme Corp"
+          ]
+        ],
+        "absent": [
+          [
+            "works_at",
+            "Globex"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "N1_current_ocr",
+      "category": "N_current_state",
+      "op": "entity_context",
+      "entity": "Drawing Extractor",
+      "expect": {
+        "current": [
+          [
+            "uses",
+            "PaddleOCR"
+          ]
+        ],
+        "historical": [
+          [
+            "uses",
+            "EasyOCR"
+          ]
+        ],
+        "not_current": [
+          [
+            "uses",
+            "EasyOCR"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "E1_alias_resolves_to_canonical",
+      "category": "E_alias",
+      "op": "search_alias",
+      "query": "What do we know about Open AI?",
+      "expect": {
+        "memories": [
+          "atlas_openai"
+        ]
+      }
+    },
+    {
+      "id": "E2_stated_alias_anchors_retrieval",
+      "category": "E_alias",
+      "op": "search_alias",
+      "query": "Which project keeps its records in PG?",
+      "expect": {
+        "memories": [
+          "atlas_pg"
+        ]
+      }
+    },
+    {
+      "id": "F1_merged_entity_context",
+      "category": "F_merged",
+      "op": "entity_context",
+      "entity": "Open AI",
+      "expect": {
+        "canonical": "OpenAI",
+        "resolved_from": true,
+        "merged_from": [
+          "Open AI"
+        ]
+      }
+    },
+    {
+      "id": "F2_merged_entity_path",
+      "category": "F_merged",
+      "op": "path",
+      "from": "Open AI",
+      "to": "Atlas",
+      "expect": {
+        "length": 1,
+        "names": [
+          "OpenAI",
+          "Atlas"
+        ]
+      }
+    },
+    {
+      "id": "G1_conflict_is_explained",
+      "category": "G_conflict",
+      "op": "explain",
+      "source": "Atlas",
+      "target": "Fly.io",
+      "predicate": "hosted_on",
+      "expect": {
+        "status": "conflicting",
+        "why_contains": "Disputed"
+      }
+    },
+    {
+      "id": "H1_supersession_evolution",
+      "category": "H_supersession",
+      "op": "evolution",
+      "memory": "kunjal_acme",
+      "expect": {
+        "kinds": [
+          "new_fact",
+          "supersession"
+        ],
+        "current": [
+          "kunjal_globex"
+        ]
+      }
+    },
+    {
+      "id": "H2_superseded_edge_explained",
+      "category": "H_supersession",
+      "op": "explain",
+      "source": "Kunjal",
+      "target": "Acme Corp",
+      "predicate": "works_at",
+      "scope": "all",
+      "expect": {
+        "state": "historical",
+        "why_contains": "No longer true",
+        "basis_includes": "temporally_derived"
+      }
+    },
+    {
+      "id": "I1_provenance_on_every_step",
+      "category": "I_provenance",
+      "op": "explain",
+      "source": "Atlas",
+      "target": "Redis",
+      "predicate": "uses",
+      "expect": {
+        "supporting": [
+          "atlas_redis",
+          "atlas_redis_again"
+        ],
+        "basis_includes": "supported_by_multiple_memories",
+        "sources_min": 2
+      }
+    },
+    {
+      "id": "J1_causal_path_labelled",
+      "category": "J_path_explanation",
+      "op": "path",
+      "from": "Adopt PaddleOCR",
+      "to": "OCR accuracy bug",
+      "expect": {
+        "length": 2,
+        "names": [
+          "Adopt PaddleOCR",
+          "Rotated-label fix",
+          "OCR accuracy bug"
+        ],
+        "relation_kinds": [
+          [
+            "causal"
+          ],
+          [
+            "causal"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "J2_possible_cause_not_fact",
+      "category": "J_path_explanation",
+      "op": "path",
+      "from": "EasyOCR",
+      "to": "OCR accuracy bug",
+      "expect": {
+        "length": 1,
+        "relation_kinds": [
+          [
+            "possible_cause"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "Q1_sequence_is_not_causation",
+      "category": "Q_decision_history",
+      "op": "path",
+      "from": "CI outage",
+      "to": "Deploy freeze",
+      "expect": {
+        "length": 2,
+        "no_relation_kind": "causal"
+      }
+    },
+    {
+      "id": "Q2_why_was_the_bug_fixed",
+      "category": "Q_decision_history",
+      "op": "context",
+      "query": "What fixed the OCR accuracy bug?",
+      "expect": {
+        "include": [
+          "OCR accuracy bug",
+          "Rotated-label fix"
+        ],
+        "exclude": [
+          "Kunjal",
+          "Globex",
+          "Perf Hub"
+        ]
+      }
+    },
+    {
+      "id": "K1_irrelevant_neighbours_rejected",
+      "category": "K_irrelevant_neighbor",
+      "op": "context",
+      "query": "Where does Atlas store its data?",
+      "expect": {
+        "include": [
+          "Atlas",
+          "PostgreSQL"
+        ],
+        "exclude": [
+          "Kunjal",
+          "Globex",
+          "Acme Corp",
+          "CI outage",
+          "Deploy freeze",
+          "Perf Hub"
+        ]
+      }
+    },
+    {
+      "id": "P1_context_connects_the_question",
+      "category": "P_context_subgraph",
+      "op": "context",
+      "query": "How is Cutlist Optimizer related to PaddleOCR?",
+      "expect": {
+        "include": [
+          "Cutlist Optimizer",
+          "Drawing Extractor",
+          "PaddleOCR"
+        ],
+        "exclude": [
+          "Atlas",
+          "Kunjal"
+        ],
+        "path": [
+          "Cutlist Optimizer",
+          "Drawing Extractor",
+          "PaddleOCR"
+        ]
+      }
+    },
+    {
+      "id": "P2_historical_context",
+      "category": "P_context_subgraph",
+      "op": "context",
+      "query": "Where did Kunjal work before?",
+      "scope": "historical",
+      "expect": {
+        "include": [
+          "Kunjal",
+          "Acme Corp"
+        ],
+        "exclude": [
+          "Globex"
+        ]
+      }
+    },
+    {
+      "id": "L1_sparse_component",
+      "category": "L_sparse",
+      "op": "entity_context",
+      "entity": "Lonely Tool",
+      "expect": {
+        "current": [],
+        "memory_total": 1
+      }
+    },
+    {
+      "id": "L2_sparse_not_connected",
+      "category": "L_sparse",
+      "op": "path",
+      "from": "Lonely Tool",
+      "to": "Atlas",
+      "expect": {
+        "length": null,
+        "reason": "not_connected_within_hops"
+      }
+    },
+    {
+      "id": "M1_dense_hub_bounded",
+      "category": "M_dense",
+      "op": "entity_context",
+      "entity": "Perf Hub",
+      "expect": {
+        "current_count_max": 25,
+        "truncated": true
+      }
+    },
+    {
+      "id": "M2_dense_path_bounded",
+      "category": "M_dense",
+      "op": "path_budget",
+      "from": "Perf Hub",
+      "to": "Kunjal",
+      "expect": {
+        "explored_max": 150
+      }
+    },
+    {
+      "id": "X1_isolation",
+      "category": "X_isolation",
+      "op": "isolation"
+    }
+  ]
+}

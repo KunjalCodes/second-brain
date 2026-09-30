@@ -51,7 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError, NotFoundError
 from app.embeddings.base import EmbeddingClient
-from app.models.domain import GraphPathStep, MemoryDetail
+from app.models.domain import Entity, GraphPathStep, MemoryDetail
 from app.models.enums import EXCLUDED_FROM_DEFAULT_RETRIEVAL, MemoryStatus
 from app.models.lifecycle import is_currently_believed, is_valid_at
 from app.repositories.embedding_repository import EmbeddingRepository
@@ -433,6 +433,36 @@ class HybridRetrievalService:
                     hits[memory_id] = max(hits.get(memory_id, 0.0), score)
         return hits
 
+    async def mentioned_entities(self, *, user_id: str, query: str) -> list[Entity]:
+        """Entities the query names, by name or ALIAS, as whole tokens.
+
+        Whole-token only (Phase 14, M8): a raw substring test let the entity
+        "AI" match inside "said". Names may contain punctuation ("fly.io",
+        "c++"), so the boundary is "no letter or digit on either side" rather
+        than \b. Aliases count too (Phase 15, M9): a canonical entity carries
+        the names merged into it, so a query naming an old spelling anchors on
+        the canonical entity even when the merged-away node is gone. Callers
+        resolve redirects; the returned entities are this user's own.
+        """
+        try:
+            entities = await self._retrieval_service.list_all_entities(
+                user_id=user_id, limit=_ENTITY_MENTION_SCAN_LIMIT
+            )
+        except AppError:
+            return []
+        query_lower = query.lower()
+
+        def named(term: str) -> bool:
+            return bool(term) and bool(
+                re.search(rf"(?<![\w]){re.escape(term)}(?![\w])", query_lower)
+            )
+
+        return [
+            e
+            for e in entities
+            if named(e.normalized_name) or any(named(a.lower()) for a in e.aliases)
+        ]
+
     async def _graph_candidates(self, *, user_id: str, query: str) -> dict[str, GraphHit]:
         """Entity-anchored, bounded multi-hop retrieval (PHASE4_PLAN.md
         sections 1-4/14): does the query name an entity this user already
@@ -471,23 +501,7 @@ class HybridRetrievalService:
         not what this channel anchors on once a redirect exists, the same
         choice already made for `get_entity`/`find_entity_by_name`.
         """
-        try:
-            entities = await self._retrieval_service.list_all_entities(
-                user_id=user_id, limit=_ENTITY_MENTION_SCAN_LIMIT
-            )
-        except AppError:
-            return {}
-
-        query_lower = query.lower()
-        # Whole-token mentions only (Phase 14, M8): a raw substring test let the
-        # entity "AI" match inside "said". Names may contain punctuation
-        # ("fly.io", "c++"), so the boundary is "no letter or digit on either
-        # side" rather than \b.
-        mentioned = [
-            e
-            for e in entities
-            if re.search(rf"(?<![\w]){re.escape(e.normalized_name)}(?![\w])", query_lower)
-        ]
+        mentioned = await self.mentioned_entities(user_id=user_id, query=query)
         if not mentioned:
             return {}
 

@@ -142,6 +142,7 @@ jobs:
             uv run python eval/document_runner.py
             uv run python eval/runner.py
             uv run python eval/memory_quality_runner.py
+            uv run python eval/graph_intelligence_runner.py
           fi
 
       - name: Fail if tests skipped despite both credentials configured

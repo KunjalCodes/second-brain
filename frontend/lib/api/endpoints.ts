@@ -67,13 +67,26 @@ export const graphOverview = (p: GraphScopeParams & { entity_type?: T.EntityType
   apiRequest<T.GraphSlice>("/graph/overview", { query: { ...p }, signal });
 export const graphNeighborhood = (
   id: string,
-  p: GraphScopeParams & { hops?: number; exclude_ids?: string[] },
+  p: GraphScopeParams & { hops?: number; exclude_ids?: string[]; entity_type?: T.EntityType[] },
   signal?: AbortSignal,
 ) => apiRequest<T.GraphSlice>(`/graph/entities/${enc(id)}/neighborhood`, { query: { ...p }, signal });
 export const edgeEvidence = (
   p: { source_entity_id: string; target_entity_id: string; predicate: string } & GraphScopeParams,
   signal?: AbortSignal,
 ) => apiRequest<T.EdgeEvidence>("/graph/edges/evidence", { query: { ...p }, signal });
+// -- graph intelligence (Phase 15) --------------------------------------------------------
+export const graphPaths = (
+  p: { source_entity_id: string; target_entity_id: string; max_hops?: number; max_paths?: number } & GraphScopeParams,
+  signal?: AbortSignal,
+) => apiRequest<T.PathsResponse>("/graph/paths", { query: { ...p }, signal });
+export const explainEdge = (
+  p: { source_entity_id: string; target_entity_id: string; predicate: string } & GraphScopeParams,
+  signal?: AbortSignal,
+) => apiRequest<T.EdgeExplanation>("/graph/edges/explain", { query: { ...p }, signal });
+export const getEntityContext = (id: string, asOf?: string, signal?: AbortSignal) =>
+  apiRequest<T.EntityContext>(`/entities/${enc(id)}/context`, { query: { as_of: asOf }, signal });
+export const getMemoryEvolution = (id: string, signal?: AbortSignal) =>
+  apiRequest<T.MemoryEvolution>(`/memories/${enc(id)}/evolution`, { signal });
 export const memoryTimeline = (id: string, signal?: AbortSignal) =>
   apiRequest<T.GraphSlice>(`/graph/memories/${enc(id)}/timeline`, { signal });
 

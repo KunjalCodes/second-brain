@@ -6,7 +6,7 @@
  *   - request construction never exceeds the server-reported budget.
  * No temporal logic, identity resolution or budget policy lives here.
  */
-import type { GraphSlice, GraphSliceEdge, GraphSliceNode } from "@/lib/api/types";
+import type { GraphPath, GraphSlice, GraphSliceEdge, GraphSliceNode } from "@/lib/api/types";
 
 /** Beyond this many canvas elements the UI asks the user to re-root (plan §21). */
 export const CANVAS_ELEMENT_CAP = 600;
@@ -155,4 +155,86 @@ export function toElements(state: GraphState): CyElement[] {
 
 function truncateLabel(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+// -- Phase 15: filters, collapse, paths ---------------------------------------------------
+
+/** Client-side relationship filter: hide `relates_to` edges of other predicates.
+ *  Non-relationship links (mentions, supersedes, ...) and all nodes are kept, so
+ *  nothing is dropped from what the server returned -- only what is drawn. */
+export function filterByPredicate(state: GraphState, predicate: string | null): GraphState {
+  if (!predicate) return state;
+  const edges = new Map<string, GraphSliceEdge>();
+  for (const [id, e] of state.edges) {
+    if (e.kind !== "relates_to" || e.predicate === predicate) edges.set(id, e);
+  }
+  return { ...state, edges };
+}
+
+/** The distinct predicates among loaded `relates_to` edges, sorted. */
+export function predicatesIn(state: GraphState): string[] {
+  const out = new Set<string>();
+  for (const e of state.edges.values()) if (e.kind === "relates_to" && e.predicate) out.add(e.predicate);
+  return [...out].sort();
+}
+
+/** Ids a slice would ADD to the canvas (used to undo one expansion). */
+export function newNodeIds(state: GraphState, slice: GraphSlice): string[] {
+  return (slice.nodes ?? []).filter((n) => !state.nodes.has(n.id)).map((n) => n.id);
+}
+
+/** Remove nodes and every edge touching them. */
+export function removeNodes(state: GraphState, ids: Iterable<string>): GraphState {
+  const drop = new Set(ids);
+  if (!drop.size) return state;
+  const nodes = new Map([...state.nodes].filter(([id]) => !drop.has(id)));
+  const edges = new Map([...state.edges].filter(([, e]) => !drop.has(e.source) && !drop.has(e.target)));
+  return { ...state, nodes, edges };
+}
+
+/** The canvas ids a path highlights: its entities and the stored edges on it. */
+export function pathHighlight(path: GraphPath): { nodeIds: Set<string>; edgeIds: Set<string> } {
+  const nodeIds = new Set(path.entity_ids);
+  const edgeIds = new Set<string>();
+  for (const step of path.steps) {
+    for (const r of step.relationships) {
+      const [source, target] =
+        r.direction === "forward"
+          ? [step.from_entity_id, step.to_entity_id]
+          : [step.to_entity_id, step.from_entity_id];
+      edgeIds.add(relatesToEdgeId(source, r.predicate, target, r.status, r.temporal_state));
+    }
+  }
+  return { nodeIds, edgeIds };
+}
+
+/** Same id the server gives an aggregated relates_to slice edge. */
+export function relatesToEdgeId(source: string, predicate: string, target: string, status: string, state: string): string {
+  return `relates_to:${source}:${predicate}:${target}:${status}:${state}`;
+}
+
+/** Put a path's entities and stored edges on the canvas. Only what is MISSING is
+ *  added: entities already loaded keep their richer data, and truncation info
+ *  (which describes the server's slices, not this path) is left untouched. */
+export function addPath(state: GraphState, path: GraphPath): GraphState {
+  const nodes = new Map(state.nodes);
+  const edges = new Map(state.edges);
+  for (const step of path.steps) {
+    for (const [id, label] of [[step.from_entity_id, step.from_name], [step.to_entity_id, step.to_name]] as const) {
+      if (!nodes.has(id)) nodes.set(id, { id, kind: "entity", label } as GraphSliceNode);
+    }
+    for (const r of step.relationships) {
+      const [source, target] =
+        r.direction === "forward" ? [step.from_entity_id, step.to_entity_id] : [step.to_entity_id, step.from_entity_id];
+      const id = relatesToEdgeId(source, r.predicate, target, r.status, r.temporal_state);
+      if (!edges.has(id)) {
+        edges.set(id, {
+          id, kind: "relates_to", source, target, predicate: r.predicate, status: r.status,
+          temporal_state: r.temporal_state, valid_from: r.valid_from, valid_until: r.valid_until,
+          memory_ids: r.memory_ids, assertion_count: r.assertion_count,
+        } as GraphSliceEdge);
+      }
+    }
+  }
+  return { ...state, nodes, edges };
 }

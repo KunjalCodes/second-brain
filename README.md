@@ -589,6 +589,20 @@ Memory intelligence (implemented and verified locally):
 
 See `docs/PHASE14_REPORT.md`.
 
+## Phase 15
+
+Graph intelligence (implemented and verified locally; not production-ready):
+- a `historical` temporal scope (facts no longer true);
+- bounded shortest-path search between entities (bidirectional, degree-guided);
+- relationship explanations that show evidence and sources;
+- entity context and memory evolution views;
+- stated-only causal labelling (sequence is never treated as cause);
+- a query-focused context subgraph;
+- Graph Explorer path finder, filters and collapse.
+
+No schema or migration change. See `docs/PHASE15_GRAPH_INTELLIGENCE.md` and
+`docs/PHASE15_REPORT.md`.
+
 ---
 
 # 🎯 Project Goal

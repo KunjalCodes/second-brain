@@ -32,11 +32,17 @@ class TemporalScope(StrEnum):
     AS_OF    any non-excluded status AND window contains the explicit `as_of`
     ALL      any non-excluded status, regardless of window; each element is
              labelled with its `temporal_state` relative to the slice's `as_of`
+    HISTORICAL  only facts no longer true at the reference instant (Phase 15)
     """
 
     CURRENT = "current"
     AS_OF = "as_of"
     ALL = "all"
+    #: Phase 15 (M2): only what is NO LONGER true at the reference instant --
+    #: a closed window (`valid_until <= as_of`) or a non-believed status
+    #: (superseded / historical), excluded statuses still excluded. The
+    #: reference instant is `as_of` if given, else now.
+    HISTORICAL = "historical"
 
 
 class TemporalState(StrEnum):

@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path, Query
 
 from app.api.deps import (
     RATE_LIMIT_GRAPH,
     RATE_LIMIT_SEARCH,
     CurrentUser,
+    GraphIntelligenceServiceDep,
     RetrievalServiceDep,
     SettingsDep,
 )
@@ -23,6 +24,7 @@ from app.models.domain import (
     RelationshipView,
 )
 from app.models.enums import Direction
+from app.schemas.graph_intelligence import EntityContext
 from app.schemas.memory import EntityListResponse
 
 router = APIRouter(prefix="/entities", tags=["entities"])
@@ -167,3 +169,24 @@ async def get_entity_graph(
     return await service.get_neighbourhood(
         user_id=user_id, entity_id=entity_id, hops=hops
     )
+
+
+@router.get(
+    "/{entity_id}/context",
+    response_model=EntityContext,
+    summary="Everything bounded the memory knows about an entity, current and historical",
+    dependencies=[RATE_LIMIT_GRAPH],
+)
+async def get_entity_context(
+    entity_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9_.:\-]{1,128}$")],
+    user_id: CurrentUser,
+    service: GraphIntelligenceServiceDep,
+    as_of: Annotated[
+        datetime | None, Query(description="Reference instant for current vs historical")
+    ] = None,
+) -> EntityContext:
+    """Phase 15 (M5): canonical entity (merge redirects followed), merged-from
+    entities, current and historical relationships, ranked related entities,
+    mentioning memories, conflicts, a validity timeline and source types --
+    every list bounded by the ENTITY_CONTEXT_* settings."""
+    return await service.entity_context(user_id=user_id, entity_id=entity_id, as_of=as_of)

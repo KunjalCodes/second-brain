@@ -73,6 +73,11 @@ function stylesheet(): StylesheetJson {
     { selector: 'edge[kind = "supersedes"]', style: { "line-style": "dashed", "line-color": accent, "target-arrow-color": accent } },
     { selector: 'edge[kind = "conflicts_with"]', style: { "line-color": warn, "target-arrow-shape": "none", width: 2 } },
     { selector: 'edge[kind = "duplicate_of"]', style: { "line-style": "dotted", "line-color": muted } },
+    // Phase 15: a highlighted path (drawn on top; everything else fades). Redundant
+    // with the textual path in the side panel -- colour is never the only cue.
+    { selector: "node.path", style: { "border-color": accent, "border-width": 4, "z-index": 9 } },
+    { selector: "edge.path", style: { "line-color": accent, "target-arrow-color": accent, width: 5, opacity: 1, "z-index": 9 } },
+    { selector: ".faded", style: { opacity: 0.25 } },
     { selector: ":selected", style: { "border-color": accent, "border-width": 4, "line-color": accent, "target-arrow-color": accent, "z-index": 10 } },
   ];
 }
@@ -83,10 +88,13 @@ export function CytoscapeCanvas({
   onSelect,
   onExpand,
   onRendered,
+  highlight,
 }: {
   elements: CyElement[];
   selection: Selection;
   onSelect: (s: Selection) => void;
+  /** Node and edge ids of a path to emphasise; everything else is faded. */
+  highlight?: { nodeIds: Set<string>; edgeIds: Set<string> } | null;
   onExpand?: (nodeId: string) => void;
   onRendered?: (ms: number, count: number) => void;
 }) {
@@ -131,6 +139,17 @@ export function CytoscapeCanvas({
   useEffect(() => {
     if (cyRef.current) sync(cyRef.current, elements, handlers.current.onRendered, container.current);
   }, [elements]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.elements().removeClass("path faded");
+    if (highlight && (highlight.nodeIds.size || highlight.edgeIds.size)) {
+      cy.elements().addClass("faded");
+      cy.nodes().filter((n) => highlight.nodeIds.has(n.id())).removeClass("faded").addClass("path");
+      cy.edges().filter((e) => highlight.edgeIds.has(e.id())).removeClass("faded").addClass("path");
+    }
+  }, [highlight, elements]);
 
   useEffect(() => {
     const cy = cyRef.current;

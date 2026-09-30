@@ -139,3 +139,32 @@ export const RETRIEVAL_CHANNEL: Record<string, string> = {
   graph: "connected entities (graph)",
   keyword: "exact words (keyword)",
 };
+
+// -- Phase 15: graph intelligence labels ---------------------------------------------------
+
+/** What a predicate STATED. Never inferred from timing (docs/PHASE15_GRAPH_INTELLIGENCE.md). */
+export const RELATION_KIND: Record<string, { text: string; explain: string }> = {
+  causal: { text: "Stated as a cause", explain: "The memory itself states a cause or consequence (for example “led to” or “fixed by”)." },
+  possible_cause: { text: "Possible cause", explain: "Stated as uncertain. This is not established as fact." },
+  association: { text: "Association", explain: "The memory states a connection. It does not say one thing caused the other." },
+};
+
+export const EVIDENCE_BASIS: Record<string, { text: string; explain: string }> = {
+  directly_stated: { text: "Stated directly", explain: "At least one stored memory asserts this relationship." },
+  supported_by_multiple_memories: { text: "Several memories agree", explain: "More than one stored memory asserts this relationship." },
+  inferred_from_graph: {
+    text: "Inferred from the graph",
+    explain: "Each step was stated, but the connection through the middle entities was not stated by anyone.",
+  },
+  temporally_derived: { text: "Not true now", explain: "Shown only because of the chosen time scope: it is not true at the current time." },
+};
+
+export const EVOLUTION_KIND: Record<string, string> = {
+  new_fact: "First recorded",
+  supersession: "Replaced an earlier memory",
+  conflict: "Disagrees with another memory",
+  conflict_resolved: "Conflict resolved by a reviewer",
+  invalidation: "Retracted",
+  merge: "Merged as a duplicate",
+  reconfirmation: "Stated again",
+};

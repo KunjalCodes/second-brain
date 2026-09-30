@@ -6,14 +6,20 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { graphNeighborhood, graphOverview, type GraphScopeParams } from "@/lib/api/endpoints";
-import type { GraphInclude } from "@/lib/api/types";
+import { graphNeighborhood, graphOverview, graphPaths, type GraphScopeParams } from "@/lib/api/endpoints";
+import type { Entity, EntityType, GraphInclude, PathsResponse } from "@/lib/api/types";
 import {
+  addPath,
   emptyGraph,
   excludeIdsFor,
+  filterByPredicate,
   isTruncated,
   mergeSlice,
+  newNodeIds,
   overCanvasCap,
+  pathHighlight,
+  predicatesIn,
+  removeNodes,
   toElements,
   CANVAS_ELEMENT_CAP,
   type GraphState,
@@ -24,17 +30,28 @@ import { Button } from "@/components/ui/Button";
 import { ErrorState, LoadingRows, PageHeader, TruncationBanner } from "@/components/ui/States";
 import type { Selection } from "./CytoscapeCanvas";
 import { EdgeDetail, NodeDetail } from "./GraphDetail";
+import { EntityPicker } from "./EntityPicker";
 import { GraphListView } from "./GraphListView";
+import { PathPanel } from "./PathPanel";
+
+const ENTITY_TYPES: EntityType[] = ["person", "project", "company", "technology", "concept", "document", "decision", "event", "task", "other"];
 
 const CytoscapeCanvas = dynamic(() => import("./CytoscapeCanvas").then((m) => m.CytoscapeCanvas), {
   ssr: false,
   loading: () => <div className="skeleton h-[420px]" role="status" aria-label="Loading graph renderer" />,
 });
 
+export type TemporalMode = "current" | "all" | "historical";
+
+export function scopeForMode(asOf: string | null, mode: TemporalMode): GraphScopeParams {
+  // `as_of` is only ever sent with temporal_scope=as_of|all|historical, never with current (422).
+  if (mode === "historical") return asOf ? { temporal_scope: "historical", as_of: asOf } : { temporal_scope: "historical" };
+  if (mode === "all") return asOf ? { temporal_scope: "all", as_of: asOf } : { temporal_scope: "all" };
+  return asOf ? { temporal_scope: "as_of", as_of: asOf } : { temporal_scope: "current" };
+}
+
 export function scopeFor(asOf: string | null, showAll: boolean): GraphScopeParams {
-  // `as_of` is only ever sent with temporal_scope=as_of|all, never with current (422).
-  if (asOf) return { temporal_scope: showAll ? "all" : "as_of", as_of: asOf };
-  return { temporal_scope: showAll ? "all" : "current" };
+  return scopeForMode(asOf, showAll ? "all" : "current");
 }
 
 export function GraphExplorer() {
@@ -44,6 +61,9 @@ export function GraphExplorer() {
   const focus = params.get("focus");
   const { asOf } = useTimeLens();
   const [showAll, setShowAll] = useState(false);
+  const [onlyPast, setOnlyPast] = useState(false);
+  const [entityType, setEntityType] = useState<EntityType | "">("");
+  const [predicateFilter, setPredicateFilter] = useState<string | null>(null);
   const [includeMemories, setIncludeMemories] = useState(false);
   const [includeMerges, setIncludeMerges] = useState(false);
   const [hops, setHops] = useState<1 | 2>(1);
@@ -60,12 +80,20 @@ export function GraphExplorer() {
   const [expanding, setExpanding] = useState(false);
   const [renderMs, setRenderMs] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Phase 15: which nodes each expansion added (to undo it), and the path finder.
+  const [expanded, setExpanded] = useState<Record<string, string[]>>({});
+  const [pathFrom, setPathFrom] = useState<string | null>(null);
+  const [pathResult, setPathResult] = useState<{ result: PathsResponse; fromLabel: string; toLabel: string } | null>(null);
+  const [pathShown, setPathShown] = useState<number | null>(null);
+  const [pathError, setPathError] = useState<unknown>(null);
 
   const include = useMemo<GraphInclude[]>(
     () => [...(includeMemories ? (["memories"] as const) : []), ...(includeMerges ? (["merges"] as const) : [])],
     [includeMemories, includeMerges],
   );
-  const scope = useMemo(() => scopeFor(asOf, showAll), [asOf, showAll]);
+  const mode: TemporalMode = onlyPast ? "historical" : showAll ? "all" : "current";
+  const scope = useMemo(() => scopeForMode(asOf, mode), [asOf, mode]);
+  const typeFilter = useMemo(() => (entityType ? { entity_type: [entityType] } : {}), [entityType]);
 
 
   const loadEntry = useCallback(async () => {
@@ -74,10 +102,14 @@ export function GraphExplorer() {
     abortRef.current = ctrl;
     setStatus("loading");
     setSelection(null);
+    setExpanded({});
+    setPathFrom(null);
+    setPathResult(null);
+    setPathShown(null);
     try {
       const slice = focus
-        ? await graphNeighborhood(focus, { ...scope, include, hops }, ctrl.signal)
-        : await graphOverview({ ...scope, include }, ctrl.signal);
+        ? await graphNeighborhood(focus, { ...scope, include, hops, ...typeFilter }, ctrl.signal)
+        : await graphOverview({ ...scope, include, ...typeFilter }, ctrl.signal);
       setState(mergeSlice(emptyGraph(), slice, true));
       setStatus("ready");
       if (slice.resolved_from && slice.root && focus !== slice.root) {
@@ -88,7 +120,7 @@ export function GraphExplorer() {
       setError(err);
       setStatus("error");
     }
-  }, [focus, scope, include, hops, router, pathname]);
+  }, [focus, scope, include, hops, typeFilter, router, pathname]);
 
   useEffect(() => {
     // Fetch-on-change of focus/scope: resetting to "loading" before an external
@@ -105,7 +137,10 @@ export function GraphExplorer() {
       setExpanding(true);
       setExpandError(null);
       try {
-        const slice = await graphNeighborhood(nodeId, { ...scope, include, hops, exclude_ids: excludeIdsFor(state, nodeId) });
+        const slice = await graphNeighborhood(nodeId, {
+          ...scope, include, hops, ...typeFilter, exclude_ids: excludeIdsFor(state, nodeId),
+        });
+        setExpanded((m) => ({ ...m, [nodeId]: newNodeIds(state, slice) }));
         setState((s) => mergeSlice(s, slice));
       } catch (err) {
         // The canvas stays as it was; only this expansion failed.
@@ -114,11 +149,58 @@ export function GraphExplorer() {
         setExpanding(false);
       }
     },
-    [state, scope, include, hops],
+    [state, scope, include, hops, typeFilter],
   );
 
   const reroot = (id: string) => router.push(`${pathname}?focus=${encodeURIComponent(id)}`);
-  const elements = useMemo(() => toElements(state), [state]);
+  const collapse = (nodeId: string) => {
+    const added = expanded[nodeId];
+    if (!added) return;
+    setExpanded((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== nodeId)));
+    // Never remove the node being collapsed or the focus; only what its expansion added.
+    setState((s) => removeNodes(s, added.filter((id) => id !== nodeId && id !== focus)));
+    setSelection({ type: "node", id: nodeId });
+  };
+
+  const findPathTo = async (target: Entity) => {
+    if (!pathFrom) return;
+    const fromLabel = state.nodes.get(pathFrom)?.label ?? "entity";
+    setPathError(null);
+    try {
+      const result = await graphPaths({ source_entity_id: pathFrom, target_entity_id: target.id, ...scope });
+      setPathResult({ result, fromLabel, toLabel: target.name });
+      setPathFrom(null);
+      const first = result.paths[0];
+      if (first) {
+        setPathShown(0);
+        setState((s) => addPath(s, first));
+      } else {
+        setPathShown(null);
+      }
+    } catch (err) {
+      setPathError(err);
+    }
+  };
+  const showPath = (i: number) => {
+    const path = pathResult?.result.paths[i];
+    if (!path) return;
+    setPathShown(i);
+    setState((s) => addPath(s, path));
+  };
+  const closePath = () => {
+    setPathFrom(null);
+    setPathResult(null);
+    setPathShown(null);
+    setPathError(null);
+  };
+
+  const viewState = useMemo(() => filterByPredicate(state, predicateFilter), [state, predicateFilter]);
+  const predicates = useMemo(() => predicatesIn(state), [state]);
+  const highlight = useMemo(
+    () => (pathResult && pathShown != null && pathResult.result.paths[pathShown] ? pathHighlight(pathResult.result.paths[pathShown]) : null),
+    [pathResult, pathShown],
+  );
+  const elements = useMemo(() => toElements(viewState), [viewState]);
   const selectedNode = selection?.type === "node" ? state.nodes.get(selection.id) : undefined;
   const selectedEdge = selection?.type === "edge" ? state.edges.get(selection.id) : undefined;
   const t = state.lastTruncation;
@@ -147,6 +229,26 @@ export function GraphExplorer() {
         <label className="inline-flex items-center gap-1">
           <input type="checkbox" checked={includeMerges} onChange={() => setIncludeMerges((v) => !v)} /> Show merge counts
         </label>
+        <label className="inline-flex items-center gap-1">
+          <input type="checkbox" checked={onlyPast} onChange={() => setOnlyPast((v) => !v)} />
+          Only no-longer-true facts
+        </label>
+        <label className="inline-flex items-center gap-1">
+          Entity type
+          <select value={entityType} onChange={(e) => setEntityType(e.target.value as EntityType | "")} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <option value="">any</option>
+            {ENTITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+        {predicates.length ? (
+          <label className="inline-flex items-center gap-1">
+            Relationship
+            <select value={predicateFilter ?? ""} onChange={(e) => setPredicateFilter(e.target.value || null)} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)]">
+              <option value="">all</option>
+              {predicates.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+        ) : null}
         <label className="inline-flex items-center gap-1">
           Expand by
           <select value={hops} onChange={(e) => setHops(Number(e.target.value) as 1 | 2)} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -205,18 +307,39 @@ export function GraphExplorer() {
                 onSelect={setSelection}
                 onExpand={(id) => void expand(id)}
                 onRendered={(ms) => setRenderMs(ms)}
+                highlight={highlight}
               />
             ) : (
-              <GraphListView state={state} onSelect={setSelection} />
+              <GraphListView state={viewState} onSelect={setSelection} />
             )}
           </div>
           <aside aria-label="Selection details" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            {selectedNode ? (
+            {pathFrom ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Find a path from {state.nodes.get(pathFrom)?.label ?? "this entity"}</p>
+                  <Button onClick={closePath}>Cancel</Button>
+                </div>
+                <EntityPicker excludeId={pathFrom} onPick={(e) => void findPathTo(e)} />
+                {pathError ? <ErrorState error={pathError} /> : null}
+              </div>
+            ) : pathResult ? (
+              <PathPanel
+                result={pathResult.result}
+                fromLabel={pathResult.fromLabel}
+                toLabel={pathResult.toLabel}
+                shown={pathShown}
+                onShow={showPath}
+                onClose={closePath}
+              />
+            ) : selectedNode ? (
               <NodeDetail
                 node={selectedNode}
                 onExpand={() => void expand(selectedNode.id)}
                 onReroot={() => reroot(selectedNode.id)}
                 expandDisabled={expanding || capped}
+                onFindPath={selectedNode.kind === "entity" ? () => setPathFrom(selectedNode.id) : undefined}
+                onCollapse={expanded[selectedNode.id] ? () => collapse(selectedNode.id) : undefined}
               />
             ) : selectedEdge ? (
               <EdgeDetail edge={selectedEdge} scope={scope} nodeLabel={(id) => state.nodes.get(id)?.label ?? "entity"} />

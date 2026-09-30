@@ -14,6 +14,7 @@ import { ErrorState, LoadingRows } from "@/components/ui/States";
 import { ProvenancePanel } from "@/components/provenance/ProvenancePanel";
 import { LinkedMemory } from "./LinkedMemory";
 import { RetractDialog } from "./RetractDialog";
+import { EvolutionPanel } from "./EvolutionPanel";
 import { WhyRemembered } from "./WhyRemembered";
 
 function entityName(entities: Entity[], id: string): string {
@@ -147,6 +148,7 @@ export function MemoryDetailView({ id }: { id: string }) {
 
       <WhyRemembered memoryId={m.id} />
       <Lifecycle d={d} />
+      <EvolutionPanel memoryId={m.id} />
       <ProvenancePanel memoryId={m.id} conflictsWith={d.conflicts_with ?? []} />
 
       <details className="text-xs text-[var(--color-fg-muted)]">

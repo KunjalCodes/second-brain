@@ -296,6 +296,17 @@ class Settings(BaseSettings):
     graph_explore_max_edges: int = Field(default=400, ge=1, le=3000)
     graph_explore_max_hops: int = Field(default=2, ge=1, le=3)
     graph_explore_max_memories_per_entity: int = Field(default=5, ge=1, le=25)
+    # -- Graph intelligence (Phase 15, docs/PHASE15_GRAPH_INTELLIGENCE.md) -------
+    # Same contract: a client may lower these, never raise them; `le=` is the
+    # hard cap. Path search also stays inside `graph_explore_max_nodes`.
+    graph_path_max_hops: int = Field(default=3, ge=1, le=4)
+    graph_path_max_paths: int = Field(default=5, ge=1, le=20)
+    graph_context_max_nodes: int = Field(default=25, ge=1, le=60)
+    graph_context_max_evidence: int = Field(default=8, ge=1, le=20)
+    graph_context_min_vector_similarity: float = Field(default=0.5, ge=0.0, le=1.0)
+    entity_context_max_relationships: int = Field(default=25, ge=1, le=100)
+    entity_context_max_related: int = Field(default=10, ge=1, le=50)
+    entity_context_max_memories: int = Field(default=10, ge=1, le=50)
 
     # -- Identity (Phase 9, docs/PHASE9_PLAN.md sections 6, 12, 13) -------------
     #: `session` (default): identity comes ONLY from a verified session
