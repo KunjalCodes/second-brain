@@ -319,6 +319,34 @@ class TestFailureAndRetry:
         assert len([m for m in await w.memories() if "Swept" in m["content"]]) == 1
         assert (await sweeper._project_events()) == {"projected": 0, "still_pending": 0}
 
+    async def test_a_poison_event_is_counted_exhausted_and_does_not_block_its_session(self, w: World, monkeypatch) -> None:  # noqa: ANN001
+        """Phase 17: an unexpected (non-AppError) failure used to roll back without counting an
+        attempt, and an exhausted event used to hold every later event of its session pending."""
+        monkeypatch.setenv("PROJECT_PROJECTION_MAX_ATTEMPTS", "2")
+        get_settings.cache_clear()
+        await w.ok(START())
+
+        class _Poison(_Down):
+            def __getattr__(self, name: str):  # noqa: ANN204
+                attr = getattr(self._real, name)
+                if name in {"read", "write", "write_transaction"} and callable(attr):
+                    async def boom(*a, **k):  # noqa: ANN002, ANN003, ANN202
+                        raise RuntimeError("unexpected bug (simulated)")
+                    return boom
+                return attr
+
+        w.h.app.dependency_overrides[get_client] = lambda: _Poison(w.h.graph)
+        (bad,) = await w.ok(E("decision", {"title": "Poison"}, t=-90))
+        assert bad["projection_status"] == "pending"
+        await w.c.post(f"/projects/{w.project_id}/events/project", headers=w.token)
+        rows = await w.pg("SELECT projection_status, projection_attempts FROM agent_events WHERE id = :i", i=bad["event_id"])
+        assert rows[0][0] == "failed" and rows[0][1] == 2
+
+        w.h.app.dependency_overrides[get_client] = lambda: w.h.graph
+        (good,) = await w.ok(E("decision", {"title": "Healthy"}, t=-80))
+        assert good["projection_status"] == "projected"
+        assert not [m for m in await w.memories() if "Poison" in m["content"]]
+
     async def test_events_project_in_session_order(self, w: World) -> None:
         """A later event is not projected ahead of an earlier pending one."""
         await w.ok(START())

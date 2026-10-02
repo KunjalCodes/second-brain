@@ -21,6 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from .client import EngineClient, EngineError
+from .client import segment as _segment
 
 Kind = Literal[
     "file", "directory", "commit", "session", "branch", "symbol", "decision", "feature",
@@ -48,11 +49,20 @@ def _safe(engine: EngineClient):  # noqa: ANN202
     async def call(coro):  # noqa: ANN001, ANN202
         try:
             return await coro
+        except ValueError as exc:  # the client refused a path outside the allow-list
+            raise ToolError(f"invalid_argument: {exc}") from None
         except EngineError as exc:
             hint = f" Fields: {exc.fields}" if exc.fields else ""
             raise ToolError(f"{exc.code} (HTTP {exc.status}): {exc.message}.{hint}") from None
 
     return call
+
+
+def segment(value: str) -> str:
+    try:
+        return _segment(value)
+    except ValueError as exc:
+        raise ToolError(f"invalid_argument: {exc}") from None
 
 
 def build_server(engine: EngineClient) -> MCPServer:
@@ -124,7 +134,7 @@ def build_server(engine: EngineClient) -> MCPServer:
         """One agent session in detail; without session_id, lists recent sessions."""
         if session_id is None:
             return await call(engine.get("/sessions", limit=min(limit, 50)))
-        return await call(engine.get(f"/sessions/{session_id}", after_seq=after_seq, limit=limit))
+        return await call(engine.get(f"/sessions/{segment(session_id)}", after_seq=after_seq, limit=limit))
 
     @server.tool()
     async def get_resume_context(session_id: Annotated[str, Field(description="An EXISTING session to resume. Omit it to resume the most recent work; do not pass the id of a session you are only about to start.")] | None = None, task: Text | None = None, max_items: Annotated[int, Field(ge=1, le=10)] | None = None, include_unrelated: bool = False) -> dict[str, Any]:
@@ -135,7 +145,7 @@ def build_server(engine: EngineClient) -> MCPServer:
     async def get_source(kind: Literal["memory", "event", "commit"], ref: Annotated[str, Field(min_length=1, max_length=64)]) -> dict[str, Any]:
         """Why does the system believe this? The stored original behind a memory id, event id or commit hash."""
         route = {"memory": "/sources/memory/", "event": "/sources/event/", "commit": "/sources/commit/"}[kind]
-        return await call(engine.get(route + ref))
+        return await call(engine.get(route + segment(ref)))
 
     @server.tool()
     async def record_agent_event(session_id: Annotated[str, Field(min_length=1, max_length=64)], event_type: EventType, payload: dict[str, Any], timestamp: str | None = None, event_id: Annotated[str, Field(max_length=128)] | None = None) -> dict[str, Any]:

@@ -197,6 +197,7 @@ def create_app() -> FastAPI:
             "Authorization",
             "Content-Type",
             REQUEST_ID_HEADER,
+            "X-Memory-Space",  # Phase 16: the browser's memory-space selection
             *(["X-User-Id"] if settings.effective_auth_mode == "dev_header" else []),
         ],
         expose_headers=[REQUEST_ID_HEADER, CLIENT_REQUEST_ID_HEADER, "Retry-After"],

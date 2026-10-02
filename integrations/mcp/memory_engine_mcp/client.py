@@ -67,6 +67,7 @@ class EngineClient:
     async def request(
         self, method: str, route: str, *, params: dict[str, Any] | None = None, body: Any = None  # noqa: ANN401
     ) -> dict[str, Any]:
+        _check_route(route)
         clean = {k: v for k, v in (params or {}).items() if v is not None}
         try:
             resp = await self._http.request(
@@ -92,3 +93,29 @@ class EngineClient:
 
     async def post(self, route: str, body: Any) -> dict[str, Any]:  # noqa: ANN401
         return await self.request("POST", route, body=body)
+
+
+_BAD_SEGMENT_CHARS = set('/\\?#%') | {chr(c) for c in range(32)} | {chr(127)}
+
+
+def segment(value: str) -> str:
+    """One caller-supplied identifier as ONE safe URL path segment.
+
+    The adapter's whole safety argument is "every call stays under /projects/current/".
+    An id such as `../../x` or `a/b` would let a caller walk out of the allow-list
+    (Phase 17), so anything that could add, remove or reinterpret a path segment is
+    refused instead of escaped (an encoded `%2F` is decoded by the server's router)."""
+    if not value or value in {".", ".."} or any(ch in _BAD_SEGMENT_CHARS for ch in value):
+        raise ValueError("identifier contains characters that are not allowed in a path")
+    return value
+
+
+def _check_route(route: str) -> None:
+    """Defence in depth: the joined route must still be a plain path under `/projects/current`."""
+    parts = route.split("/")
+    if (
+        not route.startswith("/")
+        or any(ch in _BAD_SEGMENT_CHARS - {"/"} for ch in route)
+        or any(p in {".", ".."} or (p == "" and i > 0) for i, p in enumerate(parts) if i > 0)
+    ):
+        raise ValueError("refusing a request path outside the allow-listed project routes")

@@ -73,7 +73,7 @@ export function WhyRemembered({ memoryId }: { memoryId: string }) {
         <ErrorState error={q.error} onRetry={() => q.refetch()} />
       ) : q.data.origin === "direct" ? (
         <p className="text-sm text-[var(--color-fg-muted)]">
-          This memory was added directly, not extracted from a conversation or document, so there is no extraction decision on record.
+          This memory was not extracted from a conversation or document, so there is no extraction decision on record. It was added directly, or recorded from a Git commit or coding-agent event; see its source above.
         </p>
       ) : (
         <ul className="space-y-2">{q.data.decisions.map((d, i) => <Decision key={i} d={d} />)}</ul>

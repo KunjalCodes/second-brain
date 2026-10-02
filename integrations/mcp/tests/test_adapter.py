@@ -229,3 +229,44 @@ async def test_record_agent_event_documents_every_payload(engine: Engine) -> Non
     for needle in ("session_started", "session_ended", "user_request", "decision", "file_inspected", "file_modified", "bug_discovered", "error", "fix", "test_run", "commit", "task_completed", "task_blocked", "outcome*", "approach", "unfinished"):
         assert needle in doc, needle
     assert "EXISTING session" in json.dumps(tools["get_resume_context"].input_schema["properties"]["session_id"])
+
+
+BAD_IDS = ["../../auth/me", "..", ".", "a/b", "x?admin=1", "x#frag", "%2e%2e/x", "a\\b", "ab\ncd", "/etc/passwd"]
+
+
+@pytest.mark.parametrize("bad", BAD_IDS)
+@pytest.mark.parametrize(
+    ("tool", "arg"),
+    [("get_source", "ref"), ("get_agent_session", "session_id")],
+)
+async def test_path_interpolating_tools_refuse_ids_that_could_leave_the_allow_list(engine: Engine, tool: str, arg: str, bad: str) -> None:
+    """Phase 17: `ref`/`session_id` go into the URL path; `../../auth/me` used to escape
+    `/projects/current/`."""
+    args = {"kind": "memory", "ref": bad} if tool == "get_source" else {arg: bad}
+    async with connected(engine) as client:
+        result = await client.call_tool(tool, args)
+    assert result.is_error
+    assert engine.requests == []
+
+
+async def test_the_client_never_sends_a_path_outside_current_project(engine: Engine) -> None:
+    http = EngineClient("http://engine.test:8001", TOKEN, transport=httpx.MockTransport(engine.handler))
+    try:
+        for route in ["/../auth/me", "/a/../b", "/a//b", "/a\\b", "/a?x=1", "/a#b", "/a\x00b", "no-slash"]:
+            with pytest.raises(ValueError):
+                await http.get(route)
+        assert engine.requests == []
+        await http.get("/sources/commit/" + "ab12" * 10)
+        assert engine.requests[0].url.path == "/projects/current/sources/commit/" + "ab12" * 10
+    finally:
+        await http.close()
+
+
+async def test_ordinary_identifiers_still_work(engine: Engine) -> None:
+    async with connected(engine) as client:
+        await client.call_tool("get_agent_session", {"session_id": "sess-2026.10_a:b"})
+        await client.call_tool("get_source", {"kind": "event", "ref": "evt_0123-abc"})
+    assert [r.url.path for r in engine.requests] == [
+        "/projects/current/sessions/sess-2026.10_a:b",
+        "/projects/current/sources/event/evt_0123-abc",
+    ]

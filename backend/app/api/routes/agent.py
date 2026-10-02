@@ -140,6 +140,15 @@ async def run_agent_turn(
         target_message=user_message,
         window_text=window_text,
     )
+    if settings.agent_write_enabled:
+        # Phase 17: `propose_memory_update` creates its job row in its OWN session. That
+        # insert references this conversation and message; while this request's transaction
+        # still holds the conversation row locked (append_message) it blocked until the
+        # tool timeout and wrote nothing (reproduced through the real route; the unit
+        # tests missed it because they commit first). Commit the user's message before the
+        # loop so the write tool can see it. With writes disabled (the default) the turn
+        # stays fully atomic, as documented below.
+        await db_session.commit()
     result = await agent_service.run_turn(
         user_id=user_id,
         conversation_window_text=window_text,

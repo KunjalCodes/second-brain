@@ -2,6 +2,12 @@
 
 # AI Second Brain — Phase 1 + Phase 2 Reference
 
+> **Historical header.** This file started as the Phase 1/2 reference; the later sections and the
+> statement below that there is no authentication, vector search, agent or document ingestion are
+> **out of date**: all of those exist now. The current route list (88 route/method pairs) is the
+> OpenAPI document served by the running API and the table in `docs/PHASE17_SYSTEM_MAP.md`;
+> project/MCP endpoints are described in `docs/PHASE16_*.md`.
+
 Data model, graph schema, endpoints, and how to run everything locally.
 
 **Scope.** Phase 1 is the deterministic graph-memory core: memories can be created,

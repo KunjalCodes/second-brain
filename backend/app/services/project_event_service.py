@@ -279,6 +279,7 @@ class ProjectEventService:
                 session_id=current.session_id,
                 recorded_seq=current.recorded_seq,
                 limit=_ORDER_BACKLOG_LIMIT,
+                max_attempts=self._settings.project_projection_max_attempts,
             )
         for earlier_id in earlier:
             status, _, _ = await self._project_one(space_id, earlier_id)
@@ -311,7 +312,9 @@ class ProjectEventService:
                 )  # fmt: skip
                 return status, None, str(exc)  # type: ignore[return-value]
             except AppError as exc:
-                if not is_infrastructure_error(exc):
+                # A ConflictError is a concurrency outcome (e.g. a uniqueness race), not a
+                # verdict on the event: retry it like an outage instead of dropping it.
+                if not is_infrastructure_error(exc) and not isinstance(exc, ConflictError):
                     # A deterministic domain rejection is a verdict, not an outage.
                     await events.mark(
                         event_id=event.id, status="skipped", memory_id=None,
@@ -330,6 +333,21 @@ class ProjectEventService:
                     now=now, attempt=True,
                 )  # fmt: skip
                 logger.warning("project_projection_failed event_id=%s %s", event.id, note)
+                return status, None, note  # type: ignore[return-value]
+            except Exception as exc:  # noqa: BLE001 - an unexpected failure must still count
+                # Anything that is not an AppError used to roll the transaction back without
+                # touching the attempt counter, so a poison event was retried forever
+                # (Phase 17). Count it like any other failed attempt.
+                exhausted = (
+                    event.projection_attempts + 1 >= self._settings.project_projection_max_attempts
+                )
+                status = "failed" if exhausted else "pending"
+                note = f"{type(exc).__name__}: unexpected error"
+                logger.exception("project_projection_unexpected event_id=%s", event.id)
+                await events.mark(
+                    event_id=event.id, status=status, memory_id=None, note=note,
+                    now=now, attempt=True,
+                )  # fmt: skip
                 return status, None, note  # type: ignore[return-value]
             await events.mark(
                 event_id=event.id,

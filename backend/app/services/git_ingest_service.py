@@ -227,7 +227,9 @@ class GitIngestService:
                 )
                 return "projected", note
             except AppError as exc:
-                if not is_infrastructure_error(exc):
+                # A ConflictError here is a concurrency outcome, not a verdict on the commit
+                # (see `_create`): retry it like an outage instead of dropping the commit.
+                if not is_infrastructure_error(exc) and not isinstance(exc, ConflictError):
                     note = f"rejected: {exc.message}"
                     await repo.mark(commit_id=row.id, status="skipped", memory_id=None, note=note)
                     return "skipped", note
@@ -315,8 +317,10 @@ class GitIngestService:
         created = superseded = stale = 0
         for d in plain:
             if d.memory_id not in present:
-                await self._create(space, commit_id, d, at, [])
-                created += 1
+                if await self._create(space, commit_id, d, at, []):
+                    created += 1
+                else:
+                    existing += 1
         for ds in per_file.values():
             first = ds[0]
             if first.memory_id in present:
@@ -336,8 +340,10 @@ class GitIngestService:
                 if d.memory_id in present:
                     existing += 1
                     continue
-                await self._create(space, commit_id, d, at, old_ids if index == 0 else [])
-                created += 1
+                if await self._create(space, commit_id, d, at, old_ids if index == 0 else []):
+                    created += 1
+                else:
+                    existing += 1
             superseded += len(old_ids)
         return created, existing, superseded, stale
 
@@ -362,13 +368,22 @@ class GitIngestService:
                 if any((_native(vf) or at) > at for _, vf in previous):
                     continue  # an older fact arrived after a newer one
                 old = [pid for pid, _ in previous]
-            await self._create(space, commit_id, d, at, old)
-            created += 1
+            if await self._create(space, commit_id, d, at, old):
+                created += 1
         return created, len(drafts) - created
 
     async def _create(
         self, space: str, commit_id: str, d: Draft, at: datetime, supersedes: list[str]
-    ) -> None:
+    ) -> bool:
+        """Create one deterministic memory. Returns False if it already exists.
+
+        Shared memories (the repository root, directories, branch tips) have ONE id per
+        space and are written by every commit that needs them. `existing_ids` followed by
+        `create` is not atomic, so two concurrent projections can both decide to create the
+        same id; the graph's uniqueness constraint refuses the second. That is not a verdict
+        on the commit: a deterministic id that now exists IS the memory we wanted, so it is
+        adopted (Phase 17: before this, the loser was recorded as `skipped` forever and its
+        commit memories were silently lost)."""
         payload = MemoryCreate(
             content=d.content,
             confidence=1.0,
@@ -383,7 +398,13 @@ class GitIngestService:
             supersedes=supersedes,
         )
         service = MemoryService(MemoryRepository(self._graph), now_fn=self._now)
-        await service.create(user_id=space, payload=payload, memory_id=d.memory_id)
+        try:
+            await service.create(user_id=space, payload=payload, memory_id=d.memory_id)
+        except ConflictError:
+            repo = MemoryRepository(self._graph)
+            if d.memory_id in await repo.existing_ids(user_id=space, ids=[d.memory_id]):
+                return False  # a concurrent writer created the identical deterministic memory
+            raise
         if d.embed:
             await embed_and_store_memory(
                 user_id=space,
@@ -394,3 +415,4 @@ class GitIngestService:
                 settings=self._settings,
                 now_fn=self._now,
             )
+        return True

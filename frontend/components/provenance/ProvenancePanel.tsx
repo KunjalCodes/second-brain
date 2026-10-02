@@ -21,6 +21,9 @@ const SOURCE_TYPE_LABEL: Record<string, string> = {
   user_statement: "Your statement",
   tool_result: "Tool result",
   system_inference: "System inference",
+  // Phase 16/17: project memory is projected from raw events and Git commits, not extracted.
+  agent_event: "Coding-agent event",
+  git_commit: "Git commit",
 };
 
 /** Only http(s) URLs get an "open" affordance; the URL itself is shown as text. */
@@ -113,6 +116,14 @@ function SourceCard({ sp }: { sp: SourceProvenance }) {
         </p>
       ) : null}
 
+      {source.source_type === "agent_event" || source.source_type === "git_commit" ? (
+        <p className="mt-2 text-xs text-[var(--color-fg-muted)]">
+          {source.source_type === "git_commit"
+            ? "Recorded from the repository's Git history (not model output)."
+            : "Reported by a coding agent as an event in a session; the stored event is the original."}
+        </p>
+      ) : null}
+
       {!expectsResolution && source.source_type !== "url" ? (
         <p className="mt-2 text-xs text-[var(--color-fg-muted)]">
           Reference as recorded: <span className="font-mono">{source.reference ?? "—"}</span>
@@ -142,7 +153,7 @@ export function ProvenancePanel({ memoryId, conflictsWith = [] }: { memoryId: st
         <p className="text-sm">
           <strong>No source recorded for this memory.</strong>{" "}
           <span className="text-[var(--color-fg-muted)]">
-            It may have been created directly (for example through the API) rather than learned from a conversation or document.
+            It may have been created directly (for example through the API) rather than learned from a conversation, document, Git commit or agent event.
           </span>
         </p>
       ) : (

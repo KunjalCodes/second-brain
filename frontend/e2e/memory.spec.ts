@@ -55,6 +55,6 @@ test("the decision trail says when a memory has no extraction record (never inve
   await page.goto(`/memories/${seed().memories.paddleocr}`);
   const section = page.getByRole("region", { name: "How this memory was decided" });
   await expect(section).toBeVisible();
-  await expect(section.getByText(/added directly, not extracted/)).toBeVisible();
+  await expect(section.getByText(/no extraction decision/)).toBeVisible();
   await expect(section.getByText(/not a probability/)).toBeVisible();
 });

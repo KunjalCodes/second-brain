@@ -119,12 +119,13 @@ export function HybridSearch() {
         </label>
         <Button type="submit" variant="primary" disabled={search.isPending}>Search</Button>
       </form>
-      <p className="mt-1 text-xs text-[var(--color-fg-muted)]">
+      <div className="mt-1 text-xs text-[var(--color-fg-muted)]">
+        {/* A <div>, not a <p>: <Explain> renders <details>/<div>, invalid inside <p> (hydration error). */}
         Ranked by meaning, connected entities, exact words and time fit. Up to 50 results; no filters.{" "}
         <Explain summary="How is this different from the Memories page?">
           The Memories page filters by an exact substring and supports status, type and time filters with pagination. This page ranks results by relevance.
         </Explain>
-      </p>
+      </div>
       <div className="mt-4">
         {!submitted ? (
           <EmptyState title="Search your memories" />

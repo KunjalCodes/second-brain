@@ -495,9 +495,14 @@ class AgentEventRepository(UserScopedRepository):
         return [r[0] for r in rows]
 
     async def unprojected_before(
-        self, *, session_id: str, recorded_seq: int, limit: int
+        self, *, session_id: str, recorded_seq: int, limit: int, max_attempts: int
     ) -> list[str]:
-        """Earlier events of this session that still need projecting, oldest first."""
+        """Earlier events of this session that still need projecting, oldest first.
+
+        Events that have used up their attempts are TERMINAL (`failed`) and are not
+        returned: a later event must not wait on, or re-run, an event that will never
+        succeed (Phase 17: one permanently failing event used to hold the rest of its
+        session `pending` forever)."""
         rows = (
             await self._session.execute(
                 self._select_columns(AgentEvent, AgentEvent.id)
@@ -505,6 +510,7 @@ class AgentEventRepository(UserScopedRepository):
                     AgentEvent.session_id == session_id,
                     AgentEvent.recorded_seq < recorded_seq,
                     AgentEvent.projection_status.in_(("pending", "failed")),
+                    AgentEvent.projection_attempts < max_attempts,
                 )
                 .order_by(AgentEvent.recorded_seq)
                 .limit(limit)

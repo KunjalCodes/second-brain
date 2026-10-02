@@ -421,7 +421,7 @@ uv run uvicorn app.main:app --reload --port 8000    # → http://localhost:8000/
 uv run python ../scripts/seed_demo.py
 
 # 8. Tests — no API key, no network, no cost
-uv run pytest tests/unit -q   # 452 tests, no database needed
+uv run pytest tests/unit -q   # 1381 tests (Phase 17), no database needed
 uv run pytest -q              # everything; integration skips without services
 
 # 9. Optional: the evaluation harnesses (real pipeline, Fake clients)
@@ -508,7 +508,7 @@ ai-second-brain/
 │   ├── EVALUATION.md
 │   ├── API.md                   data model, graph schema, extraction pipeline, endpoints
 │   ├── PHASE2_PLAN.md .. PHASE10_PLAN.md  per-phase design + implementation status
-│   └── adr/                     architecture decision records (0001-0032)
+│   └── adr/                     architecture decision records (0001-0036)
 │
 ├── scripts/
 │   ├── init_graph.py            apply Neo4j constraints and indexes
@@ -614,6 +614,13 @@ Coding-agent memory integration (implemented and verified locally; not productio
 - the existing Graph Explorer shows project spaces and the new entity types.
 
 See `docs/PHASE16_REPORT.md`.
+
+## Phase 17
+
+Full-system audit and end-to-end validation (no new features): `docs/SYSTEM_GUIDE.md` (start here),
+`docs/SYSTEM_ARCHITECTURE.md`, `docs/PHASE17_SYSTEM_MAP.md`, `docs/RETRIEVAL_ARCHITECTURE.md`,
+`docs/PHASE17_EVALUATION_MAP.md` and `docs/PHASE17_REPORT.md`. It fixed the defects the audit
+reproduced (MCP path traversal, concurrent Git projection, agent-write deadlock, poison events).
 
 ---
 

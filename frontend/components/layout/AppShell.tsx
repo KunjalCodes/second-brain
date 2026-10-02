@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { getMemorySpace, subscribeMemorySpace } from "@/lib/api/space";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { listEntityReview, listMemoryReview } from "@/lib/api/endpoints";
 import { qk } from "@/lib/api/queryKeys";
@@ -69,6 +70,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const auth = useAuth();
   const [navOpen, setNavOpen] = useState(false);
+  // Phase 17: keyed by the selected memory space so page-local state (e.g. a loaded graph)
+  // cannot survive a switch and show one space's data under another's name.
+  const space = useSyncExternalStore(subscribeMemorySpace, getMemorySpace, () => null);
 
   return (
     <AuthGate>
@@ -125,7 +129,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ProjectSwitcher />
             <TimeLensControl />
           </header>
-          <main id="main" className="min-w-0 flex-1 p-4 lg:p-6">
+          <main id="main" key={space ?? "personal"} className="min-w-0 flex-1 p-4 lg:p-6">
             {children}
           </main>
         </div>

@@ -501,6 +501,20 @@ class TestCors:
             )
         assert response.status_code == 400
 
+    def test_the_memory_space_header_is_allowed_cross_origin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with self._app(monkeypatch, FRONTEND_URL="https://brain.example.com") as c:
+            response = c.options(
+                "/memories",
+                headers={
+                    "Origin": "https://brain.example.com",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "x-memory-space",
+                },
+            )
+        assert response.status_code == 200
+
     def test_unlisted_origin_is_not_granted_access(self, client: TestClient) -> None:
         response = client.get("/health", headers={"Origin": "https://evil.example.com"})
         assert response.headers.get("access-control-allow-origin") is None

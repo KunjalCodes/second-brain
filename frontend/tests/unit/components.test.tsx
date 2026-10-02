@@ -53,6 +53,18 @@ describe("ProvenancePanel", () => {
     expect(await screen.findByText(/content is no longer available/)).toBeTruthy();
   });
 
+  it("labels Git commit and coding-agent event sources and never calls them model output", async () => {
+    setTransport(fakeTransport(() => json(200, provenance([
+      { source: src("s1", "git_commit", "abc123") },
+      { source: src("s2", "agent_event", "evt-1") },
+    ]))).transport);
+    renderWithClient(<ProvenancePanel memoryId="m1" />);
+    expect(await screen.findByText("Git commit")).toBeTruthy();
+    expect(screen.getByText("Coding-agent event")).toBeTruthy();
+    expect(screen.getByText(/not model output/)).toBeTruthy();
+    expect(screen.getByText(/stored event is the original/)).toBeTruthy();
+  });
+
   it("offers to open only http(s) URLs, with noopener", async () => {
     setTransport(fakeTransport(() => json(200, provenance([
       { source: src("s1", "url", "javascript:alert(1)") },
