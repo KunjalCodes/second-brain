@@ -57,7 +57,7 @@ from app.extraction.decisions import (
     overall_decision,
 )
 from app.extraction.grounding import check_grounding
-from app.extraction.resolution import is_plausible_duplicate
+from app.extraction.resolution import EXACT_IDENTITY_TYPES, is_plausible_duplicate
 from app.extraction.temporal_hints import TemporalInterpretation, interpret_temporal
 from app.extraction.trigger import maybe_trigger_extraction
 from app.extraction.worthiness import evaluate_worthiness
@@ -800,6 +800,64 @@ class ExtractionRunner:
         note = f" [temporal: {temporal.note}]" if temporal.note else ""
         return replace(applied, reason=f"{worth.tag()} {applied.reason}{note}")
 
+    async def apply_structured_candidate(
+        self,
+        candidate: CandidateMemory,
+        *,
+        stated_at: datetime,
+        source_type: SourceType,
+        source_reference: str,
+        source_location_prefix: str | None,
+        user_id: str,
+        memory_service: MemoryService,
+        retrieval_service: RetrievalService,
+        merge_repo: EntityMergeCandidateRepository,
+        embedding_repo: EmbeddingRepository,
+        db: Database,
+        embed_memory: bool,
+        supersedes_memory_id: str | None = None,
+        new_memory_id: str | None = None,
+    ) -> CandidateApplication:
+        """Phase 16: the deterministic (no-LLM) entry into the SAME classify-and-persist
+        governance every extracted candidate goes through -- grounding, entity
+        ambiguity flagging, duplicate / conflict / supersession classification,
+        provenance and the canonical write.
+
+        What it skips, and why: the memory-worthiness gate (a structured project
+        event is meaningful by construction -- the caller already chose to record
+        it) and temporal-hint parsing (valid time is the event's own `stated_at`).
+        `embed_memory=False` is for structural facts, which stay searchable by
+        keyword and graph without spending embedding quota. Never calls the LLM.
+        """
+        temporal = interpret_temporal(
+            valid_from_hint=None, valid_until_hint=None, stated_at=stated_at
+        )
+        # Grounding exists to catch an LLM inventing entities that its source never
+        # mentioned. A structured event's entities are derived deterministically from
+        # its own fields, so the grounding text is the statement plus those names:
+        # the check stays in the path (spans, bounds) but cannot reject a real event.
+        grounding_text = "\n".join([candidate.statement, *(e.name for e in candidate.entities)])
+        return await self._classify_and_persist(
+            candidate,
+            temporal=temporal,
+            candidate_is_past=False,
+            target_content=grounding_text,
+            source_type=source_type,
+            source_reference=source_reference,
+            source_location_prefix=source_location_prefix,
+            window_text=grounding_text,
+            user_id=user_id,
+            memory_service=memory_service,
+            retrieval_service=retrieval_service,
+            merge_repo=merge_repo,
+            embedding_repo=embedding_repo,
+            db=db,
+            now=self._now(),
+            embed_memory=embed_memory,
+            supersedes_memory_id=supersedes_memory_id,
+            new_memory_id=new_memory_id,
+        )
+
     async def _classify_and_persist(
         self,
         candidate: CandidateMemory,
@@ -818,6 +876,9 @@ class ExtractionRunner:
         embedding_repo: EmbeddingRepository,
         db: Database,
         now: datetime,
+        embed_memory: bool = True,
+        supersedes_memory_id: str | None = None,
+        new_memory_id: str | None = None,
     ) -> CandidateApplication:
         """Classify and, for every outcome but IGNORE/INVALID, persist one candidate.
 
@@ -904,6 +965,19 @@ class ExtractionRunner:
                     fallback=governing,
                 )
 
+            if supersedes_memory_id and governing.decision in (
+                DecisionType.NEW,
+                DecisionType.LIKELY_DUPLICATE,
+                DecisionType.FLAGGED,
+            ):
+                # Phase 16: an EXPLICIT statement ("this replaces decision X") from the
+                # caller, resolved to a stored memory by the server. Duplicate and
+                # conflict outcomes above still win; this only upgrades a NEW fact.
+                governing = RelationshipDecision(
+                    DecisionType.SUPERSEDING,
+                    "explicit supersession stated by the caller",
+                    target_memory_id=supersedes_memory_id,
+                )
             memory_id = await self._persist(
                 candidate,
                 temporal=temporal,
@@ -913,8 +987,13 @@ class ExtractionRunner:
                 source_location_prefix=source_location_prefix,
                 user_id=user_id,
                 memory_service=memory_service,
+                new_memory_id=new_memory_id,
             )
-            if memory_id is not None and governing.decision in self._CREATES_NEW_MEMORY:
+            if (
+                embed_memory
+                and memory_id is not None
+                and governing.decision in self._CREATES_NEW_MEMORY
+            ):
                 await embed_and_store_memory(
                     user_id=user_id,
                     memory_id=memory_id,
@@ -1177,6 +1256,8 @@ class ExtractionRunner:
         until a human decides.
         """
         for entity in candidate.entities:
+            if entity.entity_type in EXACT_IDENTITY_TYPES:
+                continue  # Phase 16: a path / hash / session key has no "near duplicate"
             try:
                 await retrieval_service.find_entity_by_name(user_id=user_id, name=entity.name)
                 continue  # exact match already exists -- nothing ambiguous
@@ -1297,6 +1378,7 @@ class ExtractionRunner:
         source_location_prefix: str | None,
         user_id: str,
         memory_service: MemoryService,
+        new_memory_id: str | None = None,
     ) -> str | None:
         """Apply the governing decision to Neo4j via the unmodified Phase 1
         `MemoryService`. Every branch below persists or corroborates something, so
@@ -1353,7 +1435,10 @@ class ExtractionRunner:
                 valid_until=temporal.valid_until,
             )
             created = await memory_service.create(
-                user_id=user_id, payload=payload, open_start=temporal.open_start
+                user_id=user_id,
+                payload=payload,
+                open_start=temporal.open_start,
+                memory_id=new_memory_id,
             )
             return created.memory.id
 
@@ -1370,7 +1455,10 @@ class ExtractionRunner:
                 valid_until=temporal.valid_until,
             )
             created = await memory_service.create(
-                user_id=user_id, payload=payload, open_start=temporal.open_start
+                user_id=user_id,
+                payload=payload,
+                open_start=temporal.open_start,
+                memory_id=new_memory_id,
             )
             if decision.target_memory_id:
                 await memory_service.link_conflicting(

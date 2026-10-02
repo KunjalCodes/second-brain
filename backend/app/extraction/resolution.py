@@ -19,7 +19,26 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from app.models.enums import EntityType
 from app.models.normalization import normalize_name
+
+#: Phase 16: entities whose identity is EXACT (a path, a commit hash, a session key).
+#: `auth/session.py` and `auth_session.py` are different files; fuzzy duplicate
+#: flagging is wrong for them and, because it calls an embedding provider per
+#: comparison, would also spend quota on every structural entity.
+EXACT_IDENTITY_TYPES: frozenset[EntityType] = frozenset(
+    {
+        EntityType.REPOSITORY,
+        EntityType.BRANCH,
+        EntityType.DIRECTORY,
+        EntityType.FILE,
+        EntityType.CODE_SYMBOL,
+        EntityType.DEPENDENCY,
+        EntityType.COMMIT,
+        EntityType.AGENT_SESSION,
+        EntityType.TEST_RUN,
+    }
+)
 
 _NON_ALPHANUMERIC = re.compile(r"[\W_]+")
 #: A key this short is not evidence of anything ("C++" and "C#" both reduce to

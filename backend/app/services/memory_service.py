@@ -47,7 +47,12 @@ class MemoryService:
     # -- commands ----------------------------------------------------------
 
     async def create(
-        self, *, user_id: str, payload: MemoryCreate, open_start: bool = False
+        self,
+        *,
+        user_id: str,
+        payload: MemoryCreate,
+        open_start: bool = False,
+        memory_id: str | None = None,
     ) -> MemoryDetail:
         """Create a memory with its entities, relationships, source and supersessions.
 
@@ -58,7 +63,13 @@ class MemoryService:
         now = self._now()
         validate_window(payload.valid_from, payload.valid_until)
 
-        memory_id = self._new_id()
+        # Phase 16: a caller may supply the id (deterministic project-event projection
+        # derives it from the event id so a replay cannot create a second memory).
+        # Everything else -- entity, relationship and source ids -- is still generated
+        # here, which is why `id_fn` alone cannot serve this purpose.
+        if memory_id is not None and not (0 < len(memory_id) <= 64):
+            raise ValidationError("memory_id must be 1-64 characters")
+        memory_id = memory_id or self._new_id()
         if memory_id in payload.supersedes:
             raise ValidationError("A memory cannot supersede itself")
         payload = await self._redirect_merged_entities(user_id, payload)

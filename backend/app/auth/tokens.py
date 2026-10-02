@@ -23,3 +23,23 @@ def token_digest(token: str) -> str:
 
 def is_well_formed(token: str) -> bool:
     return bool(TOKEN_RE.fullmatch(token))
+
+
+# -- Phase 16: project tokens (docs/PHASE16_ARCHITECTURE.md section 9) -------------
+# A DIFFERENT prefix from session tokens on purpose: a project token can never be
+# mistaken for (or accepted as) a session, and secret scanners can tell them apart.
+
+PROJECT_TOKEN_PREFIX = "sbp_"
+PROJECT_TOKEN_RE = re.compile(r"^sbp_[A-Za-z0-9_-]{43}$")
+
+
+def new_project_token() -> str:
+    return PROJECT_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def is_project_token(token: str) -> bool:
+    return token.startswith(PROJECT_TOKEN_PREFIX)
+
+
+def is_well_formed_project_token(token: str) -> bool:
+    return bool(PROJECT_TOKEN_RE.fullmatch(token))

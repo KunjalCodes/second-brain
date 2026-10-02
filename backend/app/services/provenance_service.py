@@ -10,15 +10,68 @@ to either store or copies data between them.
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import DocumentChunkSummary, DocumentSummary, parse_chunk_id_from_location
 from app.models.domain import Source
 from app.models.enums import SourceType
+from app.models.project_history import (
+    AgentEventSummary,
+    AgentEventType,
+    GitCommitSummary,
+    GitFileChange,
+    event_text,
+)
 from app.repositories.document_repository import DocumentChunkRepository, DocumentRepository
 from app.repositories.message_repository import MessageRepository
+from app.repositories.project_history_repository import (
+    AgentEventRepository,
+    GitCommitRepository,
+)
 from app.schemas.provenance import ProvenanceView, SourceProvenance
 from app.services.memory_service import MemoryService
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
+def _commit_summary(commit, location: str | None) -> GitCommitSummary:  # noqa: ANN001
+    change = None
+    if location and location.startswith("file:"):
+        path = location[len("file:") :]
+        for item in commit.files:
+            if item.get("path") == path:
+                change = GitFileChange.model_validate(item)
+                break
+    return GitCommitSummary(
+        id=commit.id,
+        sha=commit.sha,
+        subject=commit.subject,
+        author_name=commit.author_name,
+        committed_at=commit.committed_at,
+        files_changed_count=commit.files_changed_count,
+        file_change=change,
+    )
+
+
+def _event_summary(event, session_key: str, agent_name: str | None) -> AgentEventSummary:  # noqa: ANN001
+    kind = AgentEventType(event.event_type)
+    text = event_text(kind, event.payload)
+    return AgentEventSummary(
+        id=event.id,
+        event_type=kind,
+        session_key=session_key,
+        agent_name=agent_name,
+        occurred_at=event.occurred_at,
+        recorded_at=event.recorded_at,
+        text=text[:1000] if text else None,
+    )
 
 
 class ProvenanceService:
@@ -61,6 +114,25 @@ class ProvenanceService:
                 and (chunk_id := parse_chunk_id_from_location(s.location)) is not None
             }
         )
+        commit_ids = sorted(
+            {s.reference for s in sources if s.source_type is SourceType.GIT_COMMIT and s.reference}
+        )
+        event_ids = sorted(
+            {
+                s.reference
+                for s in sources
+                if s.source_type is SourceType.AGENT_EVENT and s.reference
+            }
+        )
+        # Phase 16: a malformed reference is simply "not found", never a cast error.
+        commit_ids = [i for i in commit_ids if _is_uuid(i)]
+        event_ids = [i for i in event_ids if _is_uuid(i)]
+        commits = await GitCommitRepository(self._session, user_id=user_id).get_many(
+            commit_ids=commit_ids
+        )
+        events = await AgentEventRepository(
+            self._session, user_id=user_id
+        ).get_many_with_session_key(event_ids=event_ids)
         messages = await MessageRepository(self._session, user_id=user_id).get_many(
             message_ids=message_ids
         )
@@ -99,8 +171,22 @@ class ProvenanceService:
                             page_end=chunk.page_end,
                             heading_context=chunk.heading_context,
                         )
+            git_commit = None
+            agent_event = None
+            if source.source_type is SourceType.GIT_COMMIT and source.reference:
+                commit = commits.get(source.reference)
+                if commit is not None:
+                    git_commit = _commit_summary(commit, source.location)
+            elif source.source_type is SourceType.AGENT_EVENT and source.reference:
+                found_event = events.get(source.reference)
+                if found_event is not None:
+                    agent_event = _event_summary(*found_event)
             found: bool | None = None
-            if source.source_type is SourceType.MESSAGE:
+            if source.source_type is SourceType.GIT_COMMIT:
+                found = git_commit is not None
+            elif source.source_type is SourceType.AGENT_EVENT:
+                found = agent_event is not None
+            elif source.source_type is SourceType.MESSAGE:
                 found = message is not None
             elif source.source_type is SourceType.DOCUMENT:
                 wants_chunk = parse_chunk_id_from_location(source.location) is not None
@@ -111,6 +197,8 @@ class ProvenanceService:
                     message=message,
                     document=document,
                     document_chunk=document_chunk,
+                    git_commit=git_commit,
+                    agent_event=agent_event,
                     resolved=found,
                 )
             )

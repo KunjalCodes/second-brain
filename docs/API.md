@@ -1375,6 +1375,44 @@ for a query that names nothing the caller owns), 422 invalid parameters.
 
 ---
 
+# 4e. Project memory API (Phase 16)
+
+Design: `PHASE16_ARCHITECTURE.md`, `PHASE16_PROJECT_MEMORY.md`, `PHASE16_MCP.md`,
+`PHASE16_AGENT_CONTINUITY.md`. A **project** is an isolated memory space owned by an account. Machine clients use a
+scoped **project token** (`sbp_…`) on `/projects/{project_id}/…` (or the alias `/projects/current/…`); the owning
+account may use its session on the same routes. A project token is rejected (401) everywhere else.
+
+**Account routes** (session auth, rate-limited per account):
+
+| Route | Purpose |
+|---|---|
+| `POST /projects` | Register `{name, repository_url \| root_commits, default_branch?}`; **idempotent per repository identity** (201 created / 200 existing). Filesystem paths → 422 |
+| `GET /projects` · `GET /projects/{id}` | List / read. Never exposes the space id |
+| `POST /projects/{id}/tokens` | Mint `{label, scopes:[read\|ingest\|propose], ttl_days?}` → `{token, secret}` (secret shown once). Account session only |
+| `GET /projects/{id}/tokens` · `POST …/tokens/{token_id}/revoke` | Metadata (no secret, no hash) / revoke. Account session only |
+
+`X-Memory-Space: <project_id>` on ordinary routes (`/memories`, `/graph`, …) makes an account act inside one of its own
+projects (404 if not owned). Auth routes ignore it.
+
+**Ingestion** (`ingest` scope; idempotent; body ≤ 1 MB):
+
+| Route | Body |
+|---|---|
+| `POST …/events` | `{events:[≤50 × {session_id, event_type, timestamp(tz), payload, source?, event_id?}]}`. Types: `session_started, session_ended, user_request, decision, file_inspected, file_modified, bug_discovered, error, fix, test_run, commit, task_completed, task_blocked, memory_proposal`. Any authority field → 422. Result per event: `recorded\|duplicate`, `projection_status`, `memory_id` |
+| `POST …/events/project` | Retry projecting this project's pending events |
+| `POST …/git/commits` | `{identity, branches?, commits:[≤50]}` from `scripts/git_collect.py`; no diffs/contents/raw emails |
+| `POST …/git/structure` | `{identity, commit_sha, files:[≤100 {path, language, symbols, imports, dependencies}]}` |
+
+**Queries** (`read` scope; bounded; `notice` + `evidence` on every response): `GET …/memory/search?query&limit`,
+`/entity?kind&ref`, `/graph?kind&ref&hops≤2&max_nodes≤60`, `/history?topic&kinds&types&since&until&limit&cursor`,
+`/files/history?path`, `/commits/{sha}`, `/related-changes?path`, `/decisions`, `/bugs`, `/errors`, `/fixes`,
+`/attempts`, `/sessions`, `/sessions/{session_id}`, `/resume?session_id&task&max_items&include_unrelated`,
+`/sources/memory/{id}`, `/sources/event/{id}`, `/sources/commit/{sha}`.
+`POST …/memory/propose` (`propose` scope): `{session_id, statement, memory_type, entities, relationships, confidence≤0.8}`
+→ an event result; structural entity types cannot be proposed.
+
+Errors use the standard shape. A project the caller cannot access is `404`, never `403`; a missing scope is `403`.
+
 # 5. Running locally
 
 No Docker required.

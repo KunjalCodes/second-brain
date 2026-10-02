@@ -34,7 +34,12 @@ import { EntityPicker } from "./EntityPicker";
 import { GraphListView } from "./GraphListView";
 import { PathPanel } from "./PathPanel";
 
-const ENTITY_TYPES: EntityType[] = ["person", "project", "company", "technology", "concept", "document", "decision", "event", "task", "other"];
+const ENTITY_TYPES: EntityType[] = [
+  "person", "project", "company", "technology", "concept", "document", "decision", "event", "task", "other",
+  // Phase 16: coding-project knowledge.
+  "repository", "branch", "directory", "file", "code_symbol", "dependency", "feature", "bug",
+  "agent_session", "commit", "change", "error", "fix", "test_run",
+];
 
 const CytoscapeCanvas = dynamic(() => import("./CytoscapeCanvas").then((m) => m.CytoscapeCanvas), {
   ssr: false,

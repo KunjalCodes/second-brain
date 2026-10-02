@@ -29,4 +29,5 @@ export const qk = {
   reviewHistory: (page: number) => ["review-history", page] as const,
   reviewAll: ["review"] as const,
   extractionJobs: ["extraction-jobs"] as const,
+  projects: ["projects"] as const,
 };

@@ -18,7 +18,12 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
 from app.agent.tools import TOOL_ARGS_SCHEMAS
-from app.api.deps import get_auth_context, get_current_user_id, require_internal_token
+from app.api.deps import (
+    get_auth_context,
+    get_current_user_id,
+    get_project_scope,
+    require_internal_token,
+)
 from app.main import app
 from app.models.agent import AgentStep
 from app.models.extraction import ExtractionResult
@@ -90,7 +95,9 @@ def _route_ids() -> list[str]:
 @pytest.mark.parametrize("route", _api_routes(), ids=_route_ids())
 def test_every_route_is_exactly_one_of_public_internal_authenticated(route) -> None:  # noqa: ANN001
     calls = _calls(route.dependant)
-    authenticated = bool({get_current_user_id, get_auth_context} & calls)
+    # `get_project_scope` (Phase 16) authenticates either a project token or, through
+    # `get_auth_context`, an account session -- never neither.
+    authenticated = bool({get_current_user_id, get_auth_context, get_project_scope} & calls)
     internal = require_internal_token in calls
     public = any((m, route.path) in PUBLIC_ROUTES for m in route.methods)
     assert [authenticated, internal, public].count(True) == 1, (

@@ -126,6 +126,7 @@ export function toElements(state: GraphState): CyElement[] {
         id: n.id,
         label: n.kind === "memory" ? truncateLabel(n.label, 40) : n.label,
         kind: n.kind,
+        entity_type: n.entity_type ?? "",
         status: n.status ?? "",
         temporal_state: n.temporal_state ?? "",
         merged: n.merged_from_count ? "yes" : "no",

@@ -1,0 +1,69 @@
+{
+  "note": "Events a REAL external agent (claude CLI) managed to record in session 1 of the Phase 16 real-agent test; 23 of 32 attempts were rejected. Content is a toy repository.",
+  "session_id": "s-real-1",
+  "accepted_events": [
+    {
+      "event_type": "session_started",
+      "payload": {
+        "goal": "Investigate authentication and fix the session timeout bug in auth.py/test_auth.py, run tests, commit smallest correct change, leave README TTL note as unfinished item"
+      }
+    },
+    {
+      "event_type": "bug_discovered",
+      "payload": {
+        "title": "test"
+      }
+    },
+    {
+      "event_type": "bug_discovered",
+      "payload": {
+        "title": "test3",
+        "description": "short desc"
+      }
+    },
+    {
+      "event_type": "bug_discovered",
+      "payload": {
+        "title": "Session timeout bug: SESSION_TTL_MINUTES was 15 instead of 60",
+        "description": "In auth.py, SESSION_TTL_MINUTES was set to 15, causing sessions to expire after 15 minutes. test_auth.py::test_a_session_lives_for_an_hour expects sessions to remain valid at 45 minutes and expire by 61, implying an intended 60-minute TTL."
+      }
+    },
+    {
+      "event_type": "fix",
+      "payload": {
+        "title": "Fix session timeout TTL from 15 to 60 minutes",
+        "outcome": "succeeded",
+        "approach": "Changed the SESSION_TTL_MINUTES constant in auth.py from 15 to 60, the smallest change matching test_auth.py's expectation of an hour-long session.",
+        "description": "test_auth.py::test_a_session_lives_for_an_hour passes after the change."
+      }
+    },
+    {
+      "event_type": "test_run",
+      "payload": {
+        "command": "pytest",
+        "result": "passed"
+      }
+    },
+    {
+      "event_type": "file_modified",
+      "payload": {
+        "path": "auth.py"
+      }
+    },
+    {
+      "event_type": "test_run",
+      "payload": {
+        "command": "python3 -m pytest test_auth.py -v",
+        "result": "failed"
+      }
+    },
+    {
+      "event_type": "test_run",
+      "payload": {
+        "command": "python3 -m pytest test_auth.py -v",
+        "result": "passed"
+      }
+    }
+  ],
+  "session2_resume_task": "auth-service continue work"
+}

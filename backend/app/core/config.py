@@ -308,6 +308,21 @@ class Settings(BaseSettings):
     entity_context_max_related: int = Field(default=10, ge=1, le=50)
     entity_context_max_memories: int = Field(default=10, ge=1, le=50)
 
+    # -- Phase 16: projects (docs/PHASE16_ARCHITECTURE.md) ------------------------------
+    #: A project is a memory space owned by one account. Caps keep a runaway
+    #: client from creating unbounded spaces or credentials.
+    projects_max_per_user: int = Field(default=50, ge=1, le=1000)
+    project_tokens_max_per_project: int = Field(default=10, ge=1, le=100)
+    #: Project tokens always expire; the default is 90 days, never longer than a year.
+    project_token_default_ttl_days: int = Field(default=90, ge=1, le=365)
+    #: Agent events: an event may not claim to be from the future (clock skew only) or
+    #: from long ago, and a session may not grow without bound.
+    project_event_max_future_seconds: int = Field(default=300, ge=0, le=3600)
+    project_event_max_age_days: int = Field(default=365, ge=1, le=3650)
+    project_events_max_per_session: int = Field(default=2000, ge=1, le=100_000)
+    #: A projection that keeps failing (e.g. Neo4j down) is retried this many times.
+    project_projection_max_attempts: int = Field(default=10, ge=1, le=1000)
+
     # -- Identity (Phase 9, docs/PHASE9_PLAN.md sections 6, 12, 13) -------------
     #: `session` (default): identity comes ONLY from a verified session
     #: credential. `dev_header`: the pre-Phase-9 `X-User-Id` / `DEV_USER_ID`

@@ -143,7 +143,12 @@ jobs:
             uv run python eval/runner.py
             uv run python eval/memory_quality_runner.py
             uv run python eval/graph_intelligence_runner.py
+            uv run python eval/project_memory_runner.py
           fi
+
+      - name: MCP adapter tests (separate package, no database needed)
+        working-directory: integrations/mcp
+        run: uv run --group dev pytest -q
 
       - name: Fail if tests skipped despite both credentials configured
         # A silent skip here would mean neither store is actually covered while

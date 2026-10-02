@@ -44,6 +44,8 @@ from app.api.routes import (
     health,
     memories,
     ops,
+    project_memory,
+    projects,
     review,
     search,
 )
@@ -377,6 +379,8 @@ def create_app() -> FastAPI:
     app.include_router(memories.router, prefix=prefix)
     app.include_router(entities.router, prefix=prefix)
     app.include_router(graph.router, prefix=prefix)
+    app.include_router(projects.router, prefix=prefix)
+    app.include_router(project_memory.router, prefix=prefix)
     app.include_router(conversations.router, prefix=prefix)
     app.include_router(documents.router, prefix=prefix)
     app.include_router(extraction.router, prefix=prefix)

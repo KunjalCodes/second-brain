@@ -55,6 +55,7 @@ from app.extraction.runner import run_sweep_tick
 from app.graph.connection import GraphClient
 from app.llm.base import LLMClient
 from app.repositories.auth_repository import delete_dead_sessions
+from app.repositories.project_event_queue import unprojected_commits, unprojected_events
 from app.storage.base import DocumentStorage
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,7 @@ class Sweeper:
                 for name, step in (
                     ("extraction", self._extraction),
                     ("ingestion", self._ingestion),
+                    ("project_events", self._project_events),
                     ("sessions", self._sessions),
                 ):
                     if self._stop.is_set():
@@ -224,6 +226,67 @@ class Sweeper:
             worker_id="sweeper-ingestion",
             now_fn=self._now,
         )
+
+    async def _project_events(self) -> dict[str, int]:
+        """Phase 16: retry agent events whose projection did not complete (e.g. Neo4j
+        was down when they arrived). Idempotent and ordered; see ProjectEventService."""
+        from app.services.project_event_service import ProjectEventService
+
+        async with self._db.session() as session:
+            pending = await unprojected_events(
+                session,
+                limit=self._settings.extraction_sweep_batch_size,
+                max_attempts=self._settings.project_projection_max_attempts,
+            )
+        async with self._db.session() as session:
+            pending_commits = await unprojected_commits(
+                session,
+                limit=self._settings.extraction_sweep_batch_size,
+                max_attempts=self._settings.project_projection_max_attempts,
+            )
+        if not pending and not pending_commits:
+            return {"projected": 0, "still_pending": 0}
+        service = ProjectEventService(
+            db=self._db,
+            graph=self._graph,
+            embeddings=self._embeddings(),
+            settings=self._settings,
+            now_fn=self._now,
+        )
+        projected = still = 0
+        for space_id, event_id in pending:
+            try:
+                status, _, _ = await service.project_event(space_id=space_id, event_id=event_id)
+            except Exception as exc:  # noqa: BLE001 - one bad event must not starve the rest
+                logger.warning("sweeper_project_event_failed reason=%s", type(exc).__name__)
+                still += 1
+                continue
+            projected += status in ("projected", "skipped")
+            still += status not in ("projected", "skipped")
+        if pending_commits:
+            from app.services.git_ingest_service import GitIngestService
+            from app.services.project_service import ProjectService
+
+            git = GitIngestService(
+                db=self._db,
+                graph=self._graph,
+                embeddings=self._embeddings(),
+                projects=ProjectService(self._db, self._settings, now_fn=self._now),
+                settings=self._settings,
+                now_fn=self._now,
+            )
+            for space_id, commit_id, name in pending_commits:
+                try:
+                    status, _ = await git.project_commit(
+                        space_id=space_id, project_name=name, commit_id=commit_id
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("sweeper_project_commit_failed reason=%s", type(exc).__name__)
+                    still += 1
+                    continue
+                projected += status in ("projected", "skipped")
+                still += status not in ("projected", "skipped")
+        return {"projected": projected, "still_pending": still}
 
     async def _sessions(self) -> dict[str, int]:
         now = self._now()

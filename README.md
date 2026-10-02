@@ -603,6 +603,18 @@ Graph intelligence (implemented and verified locally; not production-ready):
 No schema or migration change. See `docs/PHASE15_GRAPH_INTELLIGENCE.md` and
 `docs/PHASE15_REPORT.md`.
 
+## Phase 16
+
+Coding-agent memory integration (implemented and verified locally; not production-ready):
+- projects as isolated memory spaces, with scoped project tokens;
+- raw agent events recorded first, then projected through the existing governance pipeline (no LLM);
+- a local read-only Git collector (commits, Python structure) and idempotent ingestion;
+- decision, bug, fix, attempt, file and commit history with explicit-evidence labelling;
+- a bounded `get_resume_context` ("where I left off") and an MCP adapter (`integrations/mcp/`);
+- the existing Graph Explorer shows project spaces and the new entity types.
+
+See `docs/PHASE16_REPORT.md`.
+
 ---
 
 # 🎯 Project Goal

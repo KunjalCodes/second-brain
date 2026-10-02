@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { listEntityReview, listMemoryReview } from "@/lib/api/endpoints";
 import { qk } from "@/lib/api/queryKeys";
 import { TimeLensControl } from "./TimeLensControl";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/States";
 
@@ -121,6 +122,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Button className="lg:hidden" aria-expanded={navOpen} aria-label="Toggle navigation" onClick={() => setNavOpen((o) => !o)}>
               ☰
             </Button>
+            <ProjectSwitcher />
             <TimeLensControl />
           </header>
           <main id="main" className="min-w-0 flex-1 p-4 lg:p-6">

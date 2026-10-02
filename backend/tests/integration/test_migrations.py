@@ -138,7 +138,7 @@ async def test_existing_database_upgrades_with_data_preserved(scratch_db: str) -
     assert [
         r["version_num"]
         for r in await _fetch(scratch_db, "SELECT version_num FROM alembic_version")
-    ] == ["320f6d898a92"]
+    ] == ["b2f392141c1b"]
     assert (await _fetch(scratch_db, "SELECT count(*) AS n FROM users WHERE id='legacy-user'"))[0][
         "n"
     ] == 1

@@ -20,9 +20,12 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -32,7 +35,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -910,3 +913,229 @@ class RateLimitCounter(Base):
     count: Mapped[int] = mapped_column(Integer, nullable=False)
 
     __table_args__ = (Index("rate_limit_counters_window", "window_start"),)
+
+
+# -- Phase 16: projects (docs/PHASE16_ARCHITECTURE.md sections 3, 4, 9) ----------------
+# A project is a MEMORY SPACE: it owns a dedicated `users` row (`space_id`) that every
+# existing repository and Cypher statement already filters by, so isolation between
+# projects holds by construction. `owner_user_id` is the authorising account.
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(USER_ID_LENGTH), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    #: The memory-space id: a `users.id` that no account can log in as.
+    space_id: Mapped[str] = mapped_column(
+        String(USER_ID_LENGTH), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    #: SHA-256 hex of the normalised repository identity (never a filesystem path).
+    identity_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: How the identity was derived: `remote_url` or `root_commits`.
+    identity_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    default_branch: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "identity_key", name="projects_owner_identity"),
+        UniqueConstraint("space_id", name="projects_space_unique"),
+        Index("projects_owner", "owner_user_id", "created_at"),
+        CheckConstraint("status IN ('active','archived')", name="projects_status_valid"),
+        CheckConstraint(
+            "identity_kind IN ('remote_url','root_commits')", name="projects_identity_kind_valid"
+        ),
+        CheckConstraint("char_length(identity_key) = 64", name="projects_identity_key_len"),
+    )
+
+
+class ProjectToken(Base):
+    """A credential bound to exactly one project. Only the SHA-256 of the token
+    is stored; the raw token is shown once, at creation."""
+
+    __tablename__ = "project_tokens"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    token_sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    #: Subset of `read`, `ingest`, `propose`.
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("project_tokens_project", "project_id", "revoked_at"),
+        CheckConstraint("char_length(token_sha256) = 64", name="project_tokens_hash_len"),
+        CheckConstraint("cardinality(scopes) >= 1", name="project_tokens_scopes_nonempty"),
+    )
+
+
+# -- Phase 16: project history (docs/PHASE16_ARCHITECTURE.md sections 5-8) -------------
+# These rows are scoped by `user_id` = the project's memory-space id, exactly like every
+# other user-owned table, so `UserScopedRepository` and the SQL audit apply unchanged.
+# `project_id` is carried as well, for referential integrity and per-project queries.
+
+
+class AgentSession(Base):
+    """A meaningful period of work by an external coding agent."""
+
+    __tablename__ = "agent_sessions"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(USER_ID_LENGTH), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Chosen by the client (its own conversation/run id); unique per project.
+    session_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Which agent/provider the CLIENT says it is. Informational, never an authority.
+    agent_name: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
+    #: The agent-claimed time work began / ended (valid time), not the server's.
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Explicit, from SESSION_ENDED: completed | blocked | abandoned.
+    outcome: Mapped[str | None] = mapped_column(String(16))
+    summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "session_key", name="agent_sessions_key_unique"),
+        Index("agent_sessions_recent", "user_id", "project_id", "last_event_at"),
+        CheckConstraint("status IN ('active','ended')", name="agent_sessions_status_valid"),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('completed','blocked','abandoned')",
+            name="agent_sessions_outcome_valid",
+        ),
+    )
+
+
+class AgentEvent(Base):
+    """One recorded agent event: the AUDITABLE raw record. Canonical memory and
+    graph facts are derived from it (projection), never the other way round."""
+
+    __tablename__ = "agent_events"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(USER_ID_LENGTH), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Server-assigned total order of RECORDING (never the client's clock).
+    recorded_seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    #: Idempotency key: the client's `event_id`, else a hash of the canonical event.
+    event_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    #: Valid time as CLAIMED by the agent; `recorded_at` is when the server learned it.
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: Validated, normalised payload (schema per event type). Untrusted text.
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Free-form label of the client integration (e.g. "claude-code"). Informational.
+    source: Mapped[str | None] = mapped_column(String(80))
+    projection_status: Mapped[str] = mapped_column(
+        String(12), nullable=False, server_default="pending"
+    )
+    memory_id: Mapped[str | None] = mapped_column(String(64))
+    projection_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    projection_error: Mapped[str | None] = mapped_column(String(300))
+    projected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "event_key", name="agent_events_idempotency"),
+        Index("agent_events_session_order", "user_id", "session_id", "recorded_seq"),
+        Index("agent_events_project_recent", "user_id", "project_id", "recorded_seq"),
+        Index(
+            "agent_events_unprojected",
+            "projection_status",
+            "recorded_seq",
+            postgresql_where=text("projection_status IN ('pending','failed')"),
+        ),
+        CheckConstraint(
+            "event_type IN ('session_started','session_ended','user_request','decision',"
+            "'file_inspected','file_modified','bug_discovered','error','fix','test_run',"
+            "'commit','task_completed','task_blocked','memory_proposal')",
+            name="agent_events_type_valid",
+        ),
+        CheckConstraint(
+            "projection_status IN ('pending','projected','skipped','failed')",
+            name="agent_events_projection_valid",
+        ),
+        CheckConstraint("char_length(payload_sha256) = 64", name="agent_events_hash_len"),
+    )
+
+
+class GitCommit(Base):
+    """A commit imported by the local read-only collector. Structured metadata
+    only: no diffs, no file contents."""
+
+    __tablename__ = "git_commits"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(USER_ID_LENGTH), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    sha: Mapped[str] = mapped_column(String(64), nullable=False)
+    parents: Mapped[list[str]] = mapped_column(ARRAY(String(64)), nullable=False)
+    author_name: Mapped[str | None] = mapped_column(String(200))
+    #: SHA-256 of the lower-cased author email: identity without storing the address.
+    author_email_sha256: Mapped[str | None] = mapped_column(String(64))
+    authored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    committed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    body_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: Branch names the collector says contain this commit (bounded).
+    branches: Mapped[list[str]] = mapped_column(ARRAY(String(255)), nullable=False)
+    #: `[{path, status, additions, deletions, old_path?}]`, capped; the true count is
+    #: `files_changed_count`, and `files_truncated` says the list is partial.
+    files: Mapped[list] = mapped_column(JSONB, nullable=False)
+    files_changed_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    files_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    additions: Mapped[int | None] = mapped_column(Integer)
+    deletions: Mapped[int | None] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    projection_status: Mapped[str] = mapped_column(
+        String(12), nullable=False, server_default="pending"
+    )
+    memory_id: Mapped[str | None] = mapped_column(String(64))
+    projection_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    projection_error: Mapped[str | None] = mapped_column(String(300))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "sha", name="git_commits_sha_unique"),
+        Index("git_commits_recent", "user_id", "project_id", "committed_at"),
+        Index(
+            "git_commits_unprojected",
+            "projection_status",
+            "committed_at",
+            postgresql_where=text("projection_status IN ('pending','failed')"),
+        ),
+        CheckConstraint(
+            "projection_status IN ('pending','projected','skipped','failed')",
+            name="git_commits_projection_valid",
+        ),
+    )

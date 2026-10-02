@@ -334,7 +334,20 @@ ORDER BY m.created_at DESC, m.id
 LIMIT $limit
 """
 
+#: Phase 16: the ACTIVE memories mentioning one entity whose content starts with a
+#: given prefix -- how a re-ingested file structure finds the structure memory it
+#: replaces. Entered through the entity's identity index; bounded by $limit.
+ACTIVE_MEMORIES_MENTIONING = """
+MATCH (e:Entity {user_id: $user_id, normalized_name: $normalized_name})
+      <-[:MENTIONS]-(m:Memory {user_id: $user_id, status: 'active'})
+WHERE m.content STARTS WITH $prefix
+RETURN m.id AS id, m.valid_from AS valid_from
+ORDER BY m.created_at DESC, m.id
+LIMIT $limit
+"""
+
 USER_SCOPED_STATEMENTS: tuple[str, ...] = (
+    ACTIVE_MEMORIES_MENTIONING,
     RESOLVE_MERGED_NAMES,
     SEARCH_BY_TERMS,
     CREATE_MEMORY,
@@ -418,6 +431,28 @@ class MemoryRepository:
             steps.append(TxStep(SUPERSEDE_RELATIONSHIPS, supersede_params))
 
         await self._client.write_transaction(steps)
+
+    async def existing_ids(self, *, user_id: str, ids: list[str]) -> set[str]:
+        """Which of these memory ids exist for this user (bounded by the caller)."""
+        if not ids:
+            return set()
+        rows = await self._client.read(CHECK_MEMORIES_EXIST, {"user_id": user_id, "ids": ids})
+        return {r["id"] for r in rows}
+
+    async def active_memories_mentioning(
+        self, *, user_id: str, normalized_name: str, prefix: str, limit: int = 50
+    ) -> list[tuple[str, Any]]:
+        """(memory id, valid_from) pairs."""
+        rows = await self._client.read(
+            ACTIVE_MEMORIES_MENTIONING,
+            {
+                "user_id": user_id,
+                "normalized_name": normalized_name,
+                "prefix": prefix,
+                "limit": limit,
+            },
+        )
+        return [(r["id"], r["valid_from"]) for r in rows]
 
     async def search_by_terms(
         self, *, user_id: str, terms: list[str], limit: int

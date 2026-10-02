@@ -72,6 +72,23 @@ class EntityType(StrEnum):
     EVENT = "event"
     TASK = "task"
     OTHER = "other"
+    # -- Phase 16: coding-project knowledge (docs/PHASE16_ARCHITECTURE.md section 5).
+    # Additive: Neo4j stores the string, so no graph migration. Extraction prompts are
+    # NOT told about these; they are produced only by deterministic project ingestion.
+    REPOSITORY = "repository"
+    BRANCH = "branch"
+    DIRECTORY = "directory"
+    FILE = "file"
+    CODE_SYMBOL = "code_symbol"
+    DEPENDENCY = "dependency"
+    FEATURE = "feature"
+    BUG = "bug"
+    AGENT_SESSION = "agent_session"
+    COMMIT = "commit"
+    CHANGE = "change"
+    ERROR = "error"
+    FIX = "fix"
+    TEST_RUN = "test_run"
 
 
 class SourceType(StrEnum):
@@ -84,6 +101,11 @@ class SourceType(StrEnum):
     TOOL_RESULT = "tool_result"
     USER_STATEMENT = "user_statement"
     SYSTEM_INFERENCE = "system_inference"
+    # -- Phase 16. `reference` is the PostgreSQL id of the stored original
+    # (`git_commits.id` / `agent_events.id`); `location` names the part of it
+    # (`file:<path>`, `field:<name>`).
+    GIT_COMMIT = "git_commit"
+    AGENT_EVENT = "agent_event"
 
 
 class Direction(StrEnum):
@@ -103,3 +125,18 @@ KNOWN_PREDICATES: frozenset[str] = frozenset(
         "related_to", "replaced", "supersedes", "causes", "belongs_to",
     }
 )
+
+
+#: Phase 16: predicates the project integration produces. Reference only -- predicates
+#: stay free text -- but the evidence labels and history views key off these.
+PROJECT_PREDICATES: frozenset[str] = frozenset(
+    {
+        "contains", "depends_on", "calls", "changed", "implemented", "fixed",
+        "worked_on", "modified", "inspected", "discovered", "made", "encountered",
+        "fixed_by", "led_to", "superseded_by", "validated", "affected", "requested",
+        "completed", "blocked_on", "continues", "ran", "committed", "created",
+        "deleted", "renamed_from", "manifested_as", "partially_fixed_by",
+        "attempted_fix", "failed_on", "covered", "imports", "defines", "member_of",
+        "child_of", "on_branch", "points_at",
+    }
+)  # fmt: skip

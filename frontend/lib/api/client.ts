@@ -11,6 +11,8 @@
  * through untouched -- the client never "fixes up" backend data.
  */
 
+import { getMemorySpace } from "./space";
+
 export const API_BASE = "/api";
 
 export type QueryValue = string | number | boolean | null | undefined;
@@ -109,6 +111,12 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   signal?.addEventListener("abort", abortFromCaller, { once: true });
 
   const headers: Record<string, string> = { Accept: "application/json" };
+  // Phase 16: a selected project is a memory space. Account and project-management
+  // routes always act on the account itself, so they never carry the selection.
+  const space = getMemorySpace();
+  if (space && !path.startsWith("/auth/") && !path.startsWith("/projects")) {
+    headers["X-Memory-Space"] = space;
+  }
   let body: BodyInit | undefined;
   if (json !== undefined) {
     headers["Content-Type"] = "application/json";

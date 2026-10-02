@@ -297,9 +297,28 @@ async def teardown(state_path: Path) -> int:
     graph = GraphClient(settings)
     await graph.connect()
     try:
+        spaces: list[str] = []
         async with db.session() as session:
             for u in users:
                 uid = u["user_id"]
+                # Phase 16: a project is a memory space owned by the account. Remove its
+                # rows (events, sessions, commits and tokens cascade from the project), then
+                # the space's own data and `users` row, before the account itself.
+                owned = await session.execute(
+                    text("SELECT space_id FROM projects WHERE owner_user_id = :u"), {"u": uid}
+                )
+                owned_spaces = [r[0] for r in owned]
+                await session.execute(
+                    text("DELETE FROM projects WHERE owner_user_id = :u"), {"u": uid}
+                )
+                for space in owned_spaces:
+                    for table in _TABLES:
+                        await session.execute(
+                            text(f"DELETE FROM {table} WHERE user_id = :u"),  # noqa: S608
+                            {"u": space},
+                        )
+                    await session.execute(text("DELETE FROM users WHERE id = :u"), {"u": space})
+                spaces += owned_spaces
                 for table in _TABLES:
                     await session.execute(
                         text(f"DELETE FROM {table} WHERE user_id = :u"),  # noqa: S608 - fixed names
@@ -314,6 +333,8 @@ async def teardown(state_path: Path) -> int:
                     {"u": uid, "e": email_key},
                 )
                 await session.execute(text("DELETE FROM users WHERE id = :u"), {"u": uid})
+        for space in spaces:
+            await graph.write("MATCH (n {user_id: $u}) DETACH DELETE n", {"u": space})
         for u in users:
             await graph.write("MATCH (n {user_id: $u}) DETACH DELETE n", {"u": u["user_id"]})
             user_dir = (Path(settings.document_storage_dir) / u["user_id"]).resolve()

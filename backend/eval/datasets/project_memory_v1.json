@@ -1,0 +1,53 @@
+{
+  "version": "project_memory_v1",
+  "remote": "https://github.com/eval-acme/auth-service.git",
+  "project_name": "Auth Service",
+  "commits": [
+    {"msg": "Initial auth module", "day": -60, "branch": "main", "files": {"src/auth/session.py": "class Session:\n    def create(self):\n        pass\n", "src/config.py": "TTL = 15\n", "README.md": "# Auth\n"}},
+    {"msg": "Add billing invoice css", "day": -50, "branch": "main", "files": {"web/invoice.css": "body { color: red }\n"}},
+    {"msg": "Extend session TTL", "day": -2, "branch": "main", "files": {"src/config.py": "TTL = 60\n", "src/auth/session.py": "class Session:\n    def create(self):\n        pass\n\n    def renew(self):\n        pass\n"}}
+  ],
+  "events": [
+    {"s": "s0", "m": -8000, "type": "session_started", "p": {"goal": "Tidy the invoice stylesheet"}},
+    {"s": "s0", "m": -7990, "type": "decision", "p": {"title": "Use CSS variables for invoice colours", "rationale": "Easier theming", "files": ["web/invoice.css"]}, "tag": "distractor"},
+    {"s": "s0", "m": -7980, "type": "bug_discovered", "p": {"title": "Invoice header overflows", "files": ["web/invoice.css"]}, "tag": "distractor"},
+    {"s": "s0", "m": -7970, "type": "fix", "p": {"title": "Wrap invoice header", "outcome": "succeeded", "fixes_bug": "Invoice header overflows", "approach": "Wrap the header"}, "tag": "distractor"},
+    {"s": "s0", "m": -7960, "type": "session_ended", "p": {"outcome": "completed", "summary": "Invoice css tidy done"}},
+    {"s": "s1", "m": -300, "type": "session_started", "p": {"goal": "Fix the session timeout bug"}},
+    {"s": "s1", "m": -299, "type": "user_request", "p": {"text": "Investigate authentication and fix the session timeout bug", "feature": "Session timeout"}},
+    {"s": "s1", "m": -290, "type": "file_inspected", "p": {"path": "src/auth/session.py"}},
+    {"s": "s1", "m": -280, "type": "decision", "p": {"title": "Refresh tokens on every request", "rationale": "Simplest way to keep sessions alive", "files": ["src/auth/session.py"]}, "key": "dec_a"},
+    {"s": "s1", "m": -270, "type": "file_modified", "p": {"path": "src/auth/session.py", "summary": "refresh on request"}},
+    {"s": "s1", "m": -260, "type": "error", "p": {"message": "AssertionError: ttl expected 3600", "bug": "Session timeout", "files": ["tests/test_session.py"], "approach": "Refresh on every request"}},
+    {"s": "s1", "m": -259, "type": "bug_discovered", "p": {"title": "Session timeout", "description": "Sessions expire after 15 minutes", "files": ["src/auth/session.py"]}},
+    {"s": "s1", "m": -250, "type": "fix", "p": {"title": "Refresh on every request", "outcome": "failed", "fixes_error": "AssertionError: ttl expected 3600", "fixes_bug": "Session timeout", "approach": "Refresh on every request"}},
+    {"s": "s1", "m": -240, "type": "decision", "p": {"title": "Extend the TTL instead", "rationale": "Refreshing on every request adds load", "files": ["src/auth/session.py"], "supersedes_decision": "Refresh tokens on every request"}, "key": "dec_b"},
+    {"s": "s1", "m": -230, "type": "file_modified", "p": {"path": "src/auth/session.py", "summary": "TTL 15m -> 60m"}},
+    {"s": "s1", "m": -220, "type": "fix", "p": {"title": "Extend the TTL", "outcome": "succeeded", "fixes_bug": "Session timeout", "files": ["src/auth/session.py"], "approach": "Extend TTL"}},
+    {"s": "s1", "m": -210, "type": "test_run", "p": {"command": "pytest tests/test_session.py", "result": "passed", "validates": ["Extend the TTL"], "approach": "Extend TTL"}},
+    {"s": "s1", "m": -200, "type": "commit", "p": {"sha": "@HEAD", "message": "Extend session TTL", "files": ["src/auth/session.py", "src/config.py"]}},
+    {"s": "s1", "m": -190, "type": "session_ended", "p": {"outcome": "blocked", "summary": "Fix committed; docs outdated", "unfinished": ["Update the auth docs", "Add a TTL configuration test"]}},
+    {"s": "s2", "m": -30, "type": "session_started", "p": {"goal": "Update the auth docs", "continues_session": "s1"}},
+    {"s": "s2", "m": -29, "type": "user_request", "p": {"text": "Continue where we left off"}},
+    {"s": "s2", "m": -28, "type": "file_inspected", "p": {"path": "README.md"}}
+  ],
+  "search": [
+    {"query": "session timeout fix", "expect_any": ["Extend the TTL", "Session timeout", "Refresh on every request"], "forbid": ["invoice"]},
+    {"query": "invoice header overflow", "expect_any": ["Invoice header overflows", "invoice"], "forbid": ["Session timeout"]},
+    {"query": "Structure of file src/auth/session.py", "expect_any": ["Structure of file src/auth/session.py"], "forbid": []}
+  ],
+  "expect": {
+    "file_history": {"src/auth/session.py": {"commits": ["Extend session TTL", "Initial auth module"], "sessions": ["s1"], "decisions": ["Refresh tokens on every request", "Extend the TTL instead"]}, "web/invoice.css": {"commits": ["Add billing invoice css"], "sessions": [], "decisions": ["Use CSS variables for invoice colours"]}},
+    "decisions": {"Refresh tokens on every request": "superseded", "Extend the TTL instead": "active", "Use CSS variables for invoice colours": "active"},
+    "bugs": {"Session timeout": "fixed", "Invoice header overflows": "fixed"},
+    "attempts": {"Refresh on every request": "failed", "Extend TTL": "succeeded", "Wrap the header": "succeeded"},
+    "unfinished": ["Update the auth docs", "Add a TTL configuration test"],
+    "resume": {
+      "must_have_decisions": ["Extend the TTL instead", "Refresh tokens on every request"],
+      "must_have_attempts": ["Refresh on every request", "Extend TTL"],
+      "must_have_files_modified": ["src/auth/session.py"],
+      "previous_session": "s1",
+      "distractors": ["Use CSS variables for invoice colours", "Invoice header overflows", "Wrap the header", "Wrap invoice header"]
+    }
+  }
+}

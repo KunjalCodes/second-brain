@@ -80,7 +80,7 @@ wait out throttling without spending attempts, for up to
    problems.
 3. **Migrations** (from the operator machine, before the first backend deploy):
    `cd backend && DATABASE_URL=<neon> uv run alembic upgrade head && uv run alembic check`.
-   *Pass:* `alembic current` is `320f6d898a92 (head)`; `alembic check` reports no
+   *Pass:* `alembic current` is `b2f392141c1b (head)`; `alembic check` reports no
    new operations; `memory_embeddings_hnsw_cosine` exists (`\di` in psql).
 4. **Graph schema + Cypher compatibility:**
    `NEO4J_URI=<aura> … uv run python ../scripts/init_graph.py`. Then run the graph
@@ -236,6 +236,8 @@ deployment.
 
   | Revision | Downgrade drops |
   |---|---|
+  | `b2f392141c1b` (Phase 16) | `agent_sessions`, `agent_events`, `git_commits` |
+  | `3397424d24ed` (Phase 16) | `projects`, `project_tokens` |
   | `320f6d898a92` (Phase 9) | `user_accounts`, `auth_sessions`, `rate_limit_counters` |
   | `ec358e32d566` (Phase 7) | `evaluation_runs`, `evaluation_task_results` |
   | `536b236d2a78` (Phase 6) | `documents`, `document_chunks`, `ingestion_jobs`, chunk columns on `extraction_jobs` / `extraction_candidates` |

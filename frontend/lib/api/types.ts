@@ -60,3 +60,7 @@ export type EntityMergeCandidateListResponse = S["EntityMergeCandidateListRespon
 export type ReviewAuditLogResponse = S["ReviewAuditLogResponse"];
 export type ExtractionJobListResponse = S["ExtractionJobListResponse"];
 export type GraphInclude = S["GraphInclude"];
+
+// Phase 16: projects (memory spaces).
+export type ProjectView = S["ProjectView"];
+export type ProjectListResponse = S["ProjectListResponse"];

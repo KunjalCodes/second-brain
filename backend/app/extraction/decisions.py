@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.models.enums import MemoryStatus
+from app.models.enums import PROJECT_PREDICATES, MemoryStatus
 from app.models.extraction import CandidateMemory, DecisionType
 from app.models.lifecycle import is_currently_believed
 from app.models.normalization import normalize_name
@@ -53,6 +53,9 @@ MULTI_VALUED_PREDICATES = frozenset(
         "contributes_to", "manages", "leads", "speaks", "learned", "studies", "teaches",
         "attended", "visited", "created", "wrote", "reviewed", "plays",
     }  # fmt: skip
+    # Phase 16: project history ACCUMULATES. A session that modified two files, or hit
+    # two errors, has made two facts -- never a conflict.
+    | PROJECT_PREDICATES
 )
 
 

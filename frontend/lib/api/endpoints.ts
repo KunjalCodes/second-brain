@@ -165,3 +165,7 @@ export const reverseMerge = (id: string, if_version: number, reason: string | nu
   });
 export const reviewHistory = (limit = 25, offset = 0, signal?: AbortSignal) =>
   apiRequest<T.ReviewAuditLogResponse>("/review/history", { query: { limit, offset }, signal });
+
+// Phase 16: the account's projects (memory spaces). Always the account's own list.
+export const listProjects = (signal?: AbortSignal) =>
+  apiRequest<T.ProjectListResponse>("/projects", { query: { limit: 100 }, signal });

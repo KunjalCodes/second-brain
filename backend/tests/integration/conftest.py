@@ -67,6 +67,12 @@ _PG_CLEANUP_STATEMENTS = (
     "DELETE FROM auth_sessions WHERE user_id = :user_id",
     "DELETE FROM user_accounts WHERE user_id = :user_id",
     "DELETE FROM rate_limit_counters WHERE bucket_key LIKE '%:u:' || :user_id",
+    # Phase 16: a project's tokens, then the project and its memory-space `users` row
+    # (RETURNING makes the space id available after the project is gone).
+    "DELETE FROM project_tokens WHERE project_id IN "
+    "(SELECT id FROM projects WHERE owner_user_id = :user_id)",
+    "WITH p AS (DELETE FROM projects WHERE owner_user_id = :user_id RETURNING space_id) "
+    "DELETE FROM users WHERE id IN (SELECT space_id FROM p)",
     "DELETE FROM users WHERE id = :user_id",
 )
 
