@@ -12,6 +12,7 @@ import { Tag } from "@/components/ui/Chip";
 import { Explain } from "@/components/ui/Explain";
 import { ErrorState, LoadingRows } from "@/components/ui/States";
 import { ProvenancePanel } from "@/components/provenance/ProvenancePanel";
+import { TraceStrip } from "@/components/ui/Timeline";
 import { LinkedMemory } from "./LinkedMemory";
 import { RetractDialog } from "./RetractDialog";
 import { EvolutionPanel } from "./EvolutionPanel";
@@ -54,7 +55,7 @@ function Lifecycle({ d }: { d: MemoryDetail }) {
   };
   const any = Object.values(links).reduce((n, l) => n + l.length, 0);
   return (
-    <section aria-labelledby="lifecycle-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <section aria-labelledby="lifecycle-title" className="panel p-4">
       <div className="mb-2 flex items-center justify-between">
         <h2 id="lifecycle-title" className="font-semibold">History & links</h2>
         <Link className="text-sm underline" href={`/memories/${d.memory.id}/timeline`}>Open timeline →</Link>
@@ -91,9 +92,12 @@ export function MemoryDetailView({ id }: { id: string }) {
   return (
     <div className="space-y-4">
       <nav aria-label="Breadcrumb" className="text-sm"><Link className="underline" href="/memories">← Memories</Link></nav>
-      <article className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <article className="panel p-4">
         <h1 className="sr-only">Memory</h1>
-        <p className="content-text text-base">{m.content}</p>
+        <p id="memory-statement" className="content-text reading text-xl">{m.content}</p>
+        <div className="mt-2">
+          <TraceStrip steps={[{ label: "Memory", href: "#memory-statement" }, { label: "Evidence", href: "#why-title" }, { label: "Source", href: "#provenance-title" }, { label: "History", href: "#lifecycle-title" }]} />
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <MemoryStatusChip status={m.status} />
           {serverState ? <TemporalStateChip state={serverState} asOfLabel="now" /> : null}
@@ -123,7 +127,10 @@ export function MemoryDetailView({ id }: { id: string }) {
         {m.status !== "invalid" ? <div className="mt-3"><RetractDialog memoryId={m.id} /></div> : null}
       </article>
 
-      <section aria-labelledby="entities-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <WhyRemembered memoryId={m.id} />
+      <ProvenancePanel memoryId={m.id} conflictsWith={d.conflicts_with ?? []} />
+
+      <section aria-labelledby="entities-title" className="panel p-4">
         <h2 id="entities-title" className="mb-2 font-semibold">Entities mentioned</h2>
         {entities.length ? (
           <ul className="flex flex-wrap gap-2">
@@ -146,10 +153,8 @@ export function MemoryDetailView({ id }: { id: string }) {
         )}
       </section>
 
-      <WhyRemembered memoryId={m.id} />
       <Lifecycle d={d} />
       <EvolutionPanel memoryId={m.id} />
-      <ProvenancePanel memoryId={m.id} conflictsWith={d.conflicts_with ?? []} />
 
       <details className="text-xs text-[var(--color-fg-muted)]">
         <summary className="cursor-pointer">Technical details</summary>

@@ -26,7 +26,7 @@ export function ConversationView({ id }: { id: string }) {
       ) : (
         <ol className="space-y-3">
           {messages.map((m) => (
-            <li key={m.id} id={`message-${m.id}`} className="scroll-mt-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 target:border-[var(--color-accent)]">
+            <li key={m.id} id={`message-${m.id}`} className="scroll-mt-20 panel p-3 target:border-[var(--color-accent)]">
               <p className="text-xs text-[var(--color-fg-muted)]">
                 {m.role === "user" ? "You" : m.role === "assistant" ? "Assistant" : m.role} · {formatDateTime(m.created_at)}
               </p>

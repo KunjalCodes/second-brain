@@ -12,7 +12,7 @@ export function RegisterForm() {
 
   if (!REGISTRATION_ENABLED) {
     return (
-      <div className="max-w-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm">
+      <div className="max-w-sm panel p-6 text-sm">
         <h1 className="mb-2 text-lg font-semibold">Registration is closed</h1>
         <p>Accounts on this deployment are created by the operator. Ask them for access.</p>
         <p className="mt-3">
@@ -42,7 +42,7 @@ export function RegisterForm() {
 
   if (state === "done") {
     return (
-      <div className="max-w-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm">
+      <div className="max-w-sm panel p-6 text-sm">
         <h1 className="mb-2 text-lg font-semibold">Account created</h1>
         <p>You can now sign in.</p>
         <p className="mt-3">
@@ -53,7 +53,7 @@ export function RegisterForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+    <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4 panel p-6">
       <h1 className="text-lg font-semibold">Create an account</h1>
       <label className="block text-sm">
         Email

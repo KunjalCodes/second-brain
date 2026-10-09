@@ -14,7 +14,7 @@ type Decision = { kind: "merge"; canonical: "a" | "b" } | { kind: "reject" } | {
 
 function EntitySide({ label, d }: { label: string; d: EntityDetail | null | undefined }) {
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm">
+    <div className="panel p-3 text-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">{label}</p>
       {d ? (
         <>
@@ -84,13 +84,13 @@ export function EntityReviewDetail({ id }: { id: string }) {
         <EntitySide label="Entity B" d={c.entity_b} />
       </div>
       {c.status === "unreviewed" && c.entity_a && c.entity_b ? (
-        <div className="flex flex-wrap gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+        <div className="flex flex-wrap gap-2 panel p-3">
           <Button onClick={() => setDecision({ kind: "merge", canonical: "a" })}>Merge into {nameA}</Button>
           <Button onClick={() => setDecision({ kind: "merge", canonical: "b" })}>Merge into {nameB}</Button>
           <Button onClick={() => setDecision({ kind: "reject" })}>Keep separate</Button>
         </div>
       ) : c.status === "merged" ? (
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+        <div className="panel p-3">
           <Button onClick={() => setDecision({ kind: "reverse" })}>Undo this merge</Button>
         </div>
       ) : null}

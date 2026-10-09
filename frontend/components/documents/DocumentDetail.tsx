@@ -36,7 +36,7 @@ export function DocumentDetail({ id }: { id: string }) {
   return (
     <div className="space-y-4">
       <nav aria-label="Breadcrumb" className="text-sm"><Link className="underline" href="/documents">← Documents</Link></nav>
-      <header className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <header className="panel p-4">
         <h1 className="text-lg font-semibold">{d.filename}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
           <DocumentStatusChip doc={d} />

@@ -8,7 +8,19 @@ import type { Entity } from "@/lib/api/types";
 import { useDebounced } from "@/lib/hooks/useDebounced";
 import { Tag } from "@/components/ui/Chip";
 
-export function EntityPicker({ excludeId, onPick }: { excludeId: string; onPick: (e: Entity) => void }) {
+export function EntityPicker({
+  excludeId,
+  onPick,
+  autoFocus = true,
+  placeholder = "Connect to which entity? (name or alias)",
+  label = "Find the entity to connect to",
+}: {
+  excludeId: string;
+  onPick: (e: Entity) => void;
+  autoFocus?: boolean;
+  placeholder?: string;
+  label?: string;
+}) {
   const [text, setText] = useState("");
   const q = useDebounced(text.trim(), 250);
   const query = useQuery({
@@ -20,14 +32,14 @@ export function EntityPicker({ excludeId, onPick }: { excludeId: string; onPick:
   return (
     <div className="space-y-1 text-sm">
       <label className="block">
-        <span className="sr-only">Find the entity to connect to</span>
+        <span className="sr-only">{label}</span>
         <input
           type="search"
-          autoFocus
-          placeholder="Connect to which entity? (name or alias)"
+          autoFocus={autoFocus}
+          placeholder={placeholder}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1"
+          className="w-full panel px-3 py-1.5"
         />
       </label>
       {q && query.isPending ? <p className="text-xs text-[var(--color-fg-muted)]" role="status">Searching…</p> : null}

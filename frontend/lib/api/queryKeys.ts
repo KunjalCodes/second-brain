@@ -30,4 +30,9 @@ export const qk = {
   reviewAll: ["review"] as const,
   extractionJobs: ["extraction-jobs"] as const,
   projects: ["projects"] as const,
+  project: (id: string) => ["project", id] as const,
+  projectResume: (id: string) => ["project-resume", id] as const,
+  projectHistory: (id: string) => ["project-history", id] as const,
+  projectSessions: (id: string) => ["project-sessions", id] as const,
+  projectSession: (id: string, sid: string) => ["project-session", id, sid] as const,
 };

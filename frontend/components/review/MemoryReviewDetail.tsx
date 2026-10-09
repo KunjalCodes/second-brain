@@ -23,7 +23,7 @@ type Decision =
 
 function Side({ label, d }: { label: string; d: MemoryDetail }) {
   return (
-    <div className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+    <div className="space-y-2 panel p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">{label}</p>
       <p className="content-text">{d.memory.content}</p>
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -130,7 +130,7 @@ export function MemoryReviewDetail({ id }: { id: string }) {
         <Side label="Memory B" d={c.memory_b} />
       </div>
       {actionable ? (
-        <div className="flex flex-wrap gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+        <div className="flex flex-wrap gap-2 panel p-3">
           {isConflict ? (
             <>
               <Button onClick={() => setDecision({ kind: "supersede", winner: "a" })}>A replaces B</Button>

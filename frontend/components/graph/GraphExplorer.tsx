@@ -33,6 +33,7 @@ import { EdgeDetail, NodeDetail } from "./GraphDetail";
 import { EntityPicker } from "./EntityPicker";
 import { GraphListView } from "./GraphListView";
 import { PathPanel } from "./PathPanel";
+import { ENTITY_KIND } from "@/lib/format/glyphs";
 
 const ENTITY_TYPES: EntityType[] = [
   "person", "project", "company", "technology", "concept", "document", "decision", "event", "task", "other",
@@ -220,10 +221,32 @@ export function GraphExplorer() {
         </Button>
       </PageHeader>
 
-      <div className="mb-3 flex flex-wrap items-center gap-4 text-sm" role="group" aria-label="Graph options">
+      <div className="mb-3 max-w-md">
+        <EntityPicker
+          excludeId=""
+          autoFocus={false}
+          label="Find an entity to focus on"
+          placeholder="Find an entity to focus on… (name or alias)"
+          onPick={(e) => reroot(e.id)}
+        />
+      </div>
+      <p
+        role="status"
+        className="mb-3 inline-flex flex-wrap items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm"
+      >
+        <span aria-hidden="true" className="text-[var(--color-accent)]">◷</span>
         <span>
-          Time: <strong>{asOf ? `as of ${formatDateTime(asOf)}` : "now"}</strong>
+          Knowledge <strong>{asOf ? `as of ${formatDateTime(asOf)}` : "now"}</strong>
         </span>
+        <span className="text-xs text-[var(--color-fg-muted)]">
+          {mode === "historical"
+            ? "· only facts that are no longer true (dashed)"
+            : mode === "all"
+              ? "· including facts that are no longer true (dashed)"
+              : "· facts true at that moment"}
+        </span>
+      </p>
+      <div className="panel mb-3 flex flex-wrap items-center gap-4 p-3 text-sm" role="group" aria-label="Graph options">
         <label className="inline-flex items-center gap-1">
           <input type="checkbox" checked={showAll} onChange={() => setShowAll((v) => !v)} />
           Include no-longer-true facts (labelled)
@@ -318,7 +341,7 @@ export function GraphExplorer() {
               <GraphListView state={viewState} onSelect={setSelection} />
             )}
           </div>
-          <aside aria-label="Selection details" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <aside aria-label="Selection details" className="glass fade-in overflow-y-auto p-4 xl:max-h-[calc(100vh-260px)]">
             {pathFrom ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -345,6 +368,7 @@ export function GraphExplorer() {
                 expandDisabled={expanding || capped}
                 onFindPath={selectedNode.kind === "entity" ? () => setPathFrom(selectedNode.id) : undefined}
                 onCollapse={expanded[selectedNode.id] ? () => collapse(selectedNode.id) : undefined}
+                onFocusEntity={(id) => (state.nodes.has(id) ? setSelection({ type: "node", id }) : reroot(id))}
               />
             ) : selectedEdge ? (
               <EdgeDetail edge={selectedEdge} scope={scope} nodeLabel={(id) => state.nodes.get(id)?.label ?? "entity"} />
@@ -352,13 +376,19 @@ export function GraphExplorer() {
               <div className="space-y-2 text-sm text-[var(--color-fg-muted)]">
                 <p>Select an entity or a relationship. Double-click an entity (or use “Expand neighbours”) to load more.</p>
                 <p className="font-semibold text-[var(--color-fg)]">Legend</p>
+                <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+                  {(["person", "project", "technology", "document", "decision", "file", "commit", "agent_session", "bug", "fix"] as const).map((t) => (
+                    <li key={t}><span aria-hidden="true">{ENTITY_KIND[t]!.glyph}</span> {ENTITY_KIND[t]!.label}</li>
+                  ))}
+                  <li><span aria-hidden="true">❝</span> Memory (dotted)</li>
+                </ul>
                 <ul className="space-y-0.5 text-xs">
-                  <li>▭ entity · ● memory</li>
                   <li>solid line — true at the chosen time</li>
                   <li>dashed line — no longer true (kept, not deleted)</li>
                   <li>dotted line — not yet true</li>
                   <li>orange / thick — disputed</li>
                   <li>thicker line — more memories assert it</li>
+                  <li>selecting a node dims everything not connected to it</li>
                 </ul>
                 <p className="text-xs">
                   {state.nodes.size} nodes · {state.edges.size} edges loaded

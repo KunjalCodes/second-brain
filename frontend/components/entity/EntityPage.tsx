@@ -80,7 +80,7 @@ export function EntityPage({ id }: { id: string }) {
           <span aria-hidden="true">⧉ </span>The entity you opened was merged into <strong>{e.name}</strong>. Showing the merged entity.
         </p>
       ) : null}
-      <header className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <header className="panel p-4">
         <h1 className="text-xl font-semibold">{e.name}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
           <Tag>{e.entity_type}</Tag>
@@ -97,7 +97,7 @@ export function EntityPage({ id }: { id: string }) {
 
       <EntityContextPanel entityId={e.id} />
 
-      <section aria-labelledby="state-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <section aria-labelledby="state-title" className="panel p-4">
         <h2 id="state-title" className="mb-1 font-semibold">
           Relationships {asOf ? `as of ${formatDateTime(asOf)}` : "now"}
         </h2>
@@ -122,7 +122,7 @@ export function EntityPage({ id }: { id: string }) {
         )}
       </section>
 
-      <section aria-labelledby="mem-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <section aria-labelledby="mem-title" className="panel p-4">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <h2 id="mem-title" className="font-semibold">Memories mentioning {e.name}</h2>
           <NotTimeFiltered />

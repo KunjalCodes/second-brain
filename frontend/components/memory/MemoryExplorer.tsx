@@ -81,7 +81,7 @@ export function MemoryExplorer() {
         <span className="text-xs text-[var(--color-fg-muted)]">Newest recorded first</span>
       </PageHeader>
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-        <aside aria-label="Filters" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+        <aside aria-label="Filters" className="panel p-3">
           <MemoryFilters value={state} onChange={(v) => setState({ ...v, page: 1 })} />
         </aside>
         <section aria-label="Memory list">

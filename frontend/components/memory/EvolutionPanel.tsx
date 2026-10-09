@@ -17,7 +17,7 @@ import { MemoryStatusChip } from "@/components/ui/StatusChips";
 export function EvolutionPanel({ memoryId }: { memoryId: string }) {
   const q = useQuery({ queryKey: qk.evolution(memoryId), queryFn: ({ signal }) => getMemoryEvolution(memoryId, signal) });
   return (
-    <section aria-labelledby="evolution-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <section aria-labelledby="evolution-title" className="panel p-4">
       <h2 id="evolution-title" className="mb-2 font-semibold">How this knowledge evolved</h2>
       {q.isPending ? (
         <LoadingRows rows={2} label="Loading history" />

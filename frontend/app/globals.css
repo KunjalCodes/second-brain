@@ -1,39 +1,48 @@
 @import "tailwindcss";
 
-/* Design tokens (docs/PHASE10_PLAN.md §17): neutral, data-dense, one accent.
-   Contrast targets WCAG 2.1 AA in both themes. */
+/* Design tokens (docs/OBSIDIAN_UI_PLAN.md §4): warm, calm, knowledge-first. One teal
+   accent, a lavender secondary for entities, sage = true now, rose = disputed.
+   Text/background pairs target WCAG 2.1 AA in both themes (axe runs in Playwright). */
 @theme {
-  --color-bg: #f7f8fa;
-  --color-surface: #ffffff;
-  --color-surface-2: #f0f2f5;
-  --color-border: #d9dde3;
-  --color-fg: #14181f;
-  --color-fg-muted: #4b5563;
-  --color-accent: #2b59c3;
+  --color-bg: #f6f3ee;
+  --color-surface: #fdfbf8;
+  --color-surface-2: #efeae2;
+  --color-glass: rgba(253, 251, 248, 0.74);
+  --color-border: #ddd5c8;
+  --color-fg: #231f1a;
+  --color-fg-muted: #5a5248;
+  --color-accent: #2f6f6a;
+  --color-accent-2: #6b5b8a;
   --color-accent-fg: #ffffff;
-  --color-current: #0f7a4a;
-  --color-warn: #9a5b00;
-  --color-danger: #b42318;
-  --color-info: #1f5fa8;
-  --color-muted: #5b6472;
+  --color-current: #3f6b4a;
+  --color-warn: #8a5a12;
+  --color-danger: #a63d4c;
+  --color-info: #3f5f86;
+  --color-muted: #6a6258;
+  --radius-panel: 14px;
+  --shadow-soft: 0 1px 2px rgba(35, 31, 26, 0.06), 0 8px 24px rgba(35, 31, 26, 0.07);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-reading: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #0e1116;
-    --color-surface: #151a21;
-    --color-surface-2: #1c222b;
-    --color-border: #2c3440;
-    --color-fg: #e6e9ee;
-    --color-fg-muted: #a3acb9;
-    --color-accent: #7aa2ff;
-    --color-accent-fg: #0e1116;
-    --color-current: #4ccf8e;
-    --color-warn: #f0b04a;
-    --color-danger: #ff7b70;
-    --color-info: #7ab8ff;
-    --color-muted: #9aa3af;
+    --color-bg: #151311;
+    --color-surface: #1e1b18;
+    --color-surface-2: #282420;
+    --color-glass: rgba(30, 27, 24, 0.72);
+    --color-border: #3a352e;
+    --color-fg: #ece6dc;
+    --color-fg-muted: #b3aa9c;
+    --color-accent: #72bcb4;
+    --color-accent-2: #b8a8dc;
+    --color-accent-fg: #10211f;
+    --color-current: #92c99d;
+    --color-warn: #e2b560;
+    --color-danger: #e68f9b;
+    --color-info: #94b6e0;
+    --color-muted: #a89f91;
+    --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -46,7 +55,53 @@ body {
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
+}
+
+/* Memory statements are the product's content: set them like reading text. */
+.reading {
+  font-family: var(--font-reading);
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+/* Glass is used selectively (top bar, side panels, overlays); content surfaces stay solid.
+   The solid colour is the fallback where backdrop-filter is unsupported. */
+.glass {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-soft);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .glass {
+    background: var(--color-glass);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    backdrop-filter: blur(14px) saturate(1.2);
+  }
+}
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+}
+
+/* The graph canvas: a quiet dotted grid, like a notebook. */
+.dotgrid {
+  background-color: var(--color-surface);
+  background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.fade-in {
+  animation: fade-in 160ms ease-out;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
 }
 
 /* Visible focus for keyboard users everywhere. */
@@ -73,8 +128,12 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .skeleton {
+  .skeleton,
+  .fade-in {
     animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
   }
 }
 

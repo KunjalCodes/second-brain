@@ -64,3 +64,11 @@ export type GraphInclude = S["GraphInclude"];
 // Phase 16: projects (memory spaces).
 export type ProjectView = S["ProjectView"];
 export type ProjectListResponse = S["ProjectListResponse"];
+
+// Phase 18: project memory read APIs (existing endpoints, first used by the UI).
+export type ResumeContext = S["ResumeContext"];
+export type ProjectHistory = S["HistoryResponse"];
+export type TimelineItem = S["TimelineItem"];
+export type SessionList = S["SessionList"];
+export type SessionDetail = S["SessionDetail"];
+export type SessionView = S["app__schemas__project_query__SessionView"];

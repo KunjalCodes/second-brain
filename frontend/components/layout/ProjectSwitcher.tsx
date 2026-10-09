@@ -34,7 +34,7 @@ export function ProjectSwitcher() {
           setMemorySpace(e.target.value || null);
           client.clear(); // nothing from the previous space may stay cached
         }}
-        className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1"
+        className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1"
       >
         <option value="">Personal memory</option>
         {items.map((p) => (

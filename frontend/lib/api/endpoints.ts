@@ -169,3 +169,16 @@ export const reviewHistory = (limit = 25, offset = 0, signal?: AbortSignal) =>
 // Phase 16: the account's projects (memory spaces). Always the account's own list.
 export const listProjects = (signal?: AbortSignal) =>
   apiRequest<T.ProjectListResponse>("/projects", { query: { limit: 100 }, signal });
+
+// Phase 18: the project read APIs that already existed (docs/PHASE16_PROJECT_MEMORY.md). Account
+// sessions may read the projects they own; the server checks ownership on every request.
+export const getProject = (id: string, signal?: AbortSignal) =>
+  apiRequest<T.ProjectView>(`/projects/${enc(id)}`, { signal });
+export const projectResume = (id: string, signal?: AbortSignal) =>
+  apiRequest<T.ResumeContext>(`/projects/${enc(id)}/resume`, { query: { max_items: 6 }, signal });
+export const projectHistory = (id: string, limit = 30, signal?: AbortSignal) =>
+  apiRequest<T.ProjectHistory>(`/projects/${enc(id)}/history`, { query: { limit }, signal });
+export const projectSessions = (id: string, signal?: AbortSignal) =>
+  apiRequest<T.SessionList>(`/projects/${enc(id)}/sessions`, { signal });
+export const projectSession = (id: string, sessionId: string, signal?: AbortSignal) =>
+  apiRequest<T.SessionDetail>(`/projects/${enc(id)}/sessions/${enc(sessionId)}`, { query: { limit: 200 }, signal });

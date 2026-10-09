@@ -31,7 +31,7 @@ function ResultCard({ item, topScore }: { item: SearchResultItem; topScore: numb
   const relative = topScore > 0 ? Math.max(0, Math.min(1, x.final_score / topScore)) : 0;
   const state = x.temporal_state as TemporalState;
   return (
-    <li className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+    <li className="panel p-3">
       <Link href={`/memories/${d.memory.id}`} className="content-text block hover:underline">
         {d.memory.content}
       </Link>

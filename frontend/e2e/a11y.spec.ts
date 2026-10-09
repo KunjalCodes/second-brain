@@ -10,7 +10,7 @@ test("login page has no serious accessibility violations", async ({ page }) => {
 
 test.describe("signed in", () => {
   test.beforeEach(async ({ page }) => login(page));
-  for (const path of ["/", "/memories", "/entities", "/search", "/documents", "/review", "/settings"]) {
+  for (const path of ["/", "/memories", "/entities", "/search", "/documents", "/review", "/settings", "/projects"]) {
     test(`${path} has no serious accessibility violations`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");

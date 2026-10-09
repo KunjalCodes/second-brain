@@ -16,56 +16,85 @@ function cssVar(name: string, fallback: string): string {
 }
 
 function stylesheet(): StylesheetJson {
-  const fg = cssVar("--color-fg", "#14181f");
-  const muted = cssVar("--color-muted", "#5b6472");
-  const accent = cssVar("--color-accent", "#2b59c3");
-  const warn = cssVar("--color-warn", "#9a5b00");
-  const surface = cssVar("--color-surface", "#ffffff");
-  const border = cssVar("--color-border", "#d9dde3");
+  const fg = cssVar("--color-fg", "#231f1a");
+  const muted = cssVar("--color-muted", "#6a6258");
+  const accent = cssVar("--color-accent", "#2f6f6a");
+  const warn = cssVar("--color-warn", "#8a5a12");
+  const surface = cssVar("--color-surface", "#fdfbf8");
+  const border = cssVar("--color-border", "#ddd5c8");
+  const tones: Record<string, string> = {
+    accent,
+    accent2: cssVar("--color-accent-2", "#6b5b8a"),
+    current: cssVar("--color-current", "#3f6b4a"),
+    warn,
+    danger: cssVar("--color-danger", "#a63d4c"),
+    info: cssVar("--color-info", "#3f5f86"),
+    muted,
+  };
   return [
     {
       selector: "node",
       style: {
-        label: "data(label)",
+        // Label = glyph + text. Shape (below) and border carry the type; colour is a hint only.
+        label: "data(display)",
         "font-size": 11,
         color: fg,
         "text-valign": "bottom",
-        "text-margin-y": 4,
+        "text-margin-y": 5,
         "text-wrap": "ellipsis",
-        "text-max-width": "120px",
+        "text-max-width": "130px",
+        "text-background-color": surface,
+        "text-background-opacity": 0.8,
+        "text-background-padding": "2px",
+        "text-background-shape": "roundrectangle",
         "background-color": surface,
         "border-width": 2,
         "border-color": accent,
-        width: 22,
-        height: 22,
+        width: 24,
+        height: 24,
+        "transition-property": "opacity, border-width",
+        "transition-duration": 150,
       },
     },
-    { selector: 'node[kind = "entity"]', style: { shape: "round-rectangle", width: 26, height: 20 } },
-    // Phase 16: entity types differ by SHAPE (never by colour alone).
+    ...Object.entries(tones).map(([tone, color]) => ({
+      selector: `node[tone = "${tone}"]`,
+      style: { "border-color": color },
+    })),
+    { selector: 'node[kind = "entity"]', style: { shape: "round-rectangle", width: 28, height: 22 } },
+    // Entity types differ by SHAPE (never by colour alone).
+    { selector: 'node[entity_type = "person"]', style: { shape: "ellipse", width: 26, height: 26 } },
+    { selector: 'node[entity_type = "project"]', style: { shape: "round-diamond", width: 34, height: 34, "border-width": 3 } },
+    { selector: 'node[entity_type = "technology"]', style: { shape: "round-hexagon" } },
+    { selector: 'node[entity_type = "document"]', style: { shape: "round-tag" } },
     { selector: 'node[entity_type = "file"]', style: { shape: "rectangle" } },
     { selector: 'node[entity_type = "directory"]', style: { shape: "tag" } },
     { selector: 'node[entity_type = "commit"]', style: { shape: "hexagon" } },
-    { selector: 'node[entity_type = "agent_session"]', style: { shape: "octagon" } },
-    { selector: 'node[entity_type = "decision"]', style: { shape: "star" } },
+    { selector: 'node[entity_type = "agent_session"]', style: { shape: "octagon", width: 30, height: 30 } },
+    { selector: 'node[entity_type = "decision"]', style: { shape: "star", width: 30, height: 30 } },
     { selector: 'node[entity_type = "bug"], node[entity_type = "error"]', style: { shape: "triangle" } },
     { selector: 'node[entity_type = "fix"], node[entity_type = "test_run"]', style: { shape: "vee" } },
     { selector: 'node[entity_type = "code_symbol"], node[entity_type = "dependency"]', style: { shape: "ellipse" } },
     { selector: 'node[entity_type = "repository"], node[entity_type = "branch"]', style: { shape: "barrel" } },
-    { selector: 'node[kind = "memory"]', style: { shape: "ellipse", width: 12, height: 12, "border-color": muted, "font-size": 9 } },
+    {
+      selector: 'node[kind = "memory"]',
+      style: { shape: "ellipse", width: 12, height: 12, "border-color": muted, "font-size": 9, "border-style": "dotted" },
+    },
     { selector: 'node[kind = "source"]', style: { shape: "diamond", "border-color": muted } },
     { selector: 'node[merged = "yes"]', style: { "border-style": "double", "border-width": 4 } },
     {
       selector: 'node[status = "superseded"], node[status = "historical"], node[status = "merged"], node[status = "invalid"], node[status = "archived"]',
-      style: { opacity: 0.6 },
+      style: { opacity: 0.6, "border-style": "dashed" },
     },
-    { selector: 'node[status = "conflicting"]', style: { "border-color": warn } },
+    { selector: 'node[status = "conflicting"]', style: { "border-color": warn, "border-width": 3 } },
     {
       selector: "edge",
       style: {
-        width: "mapData(weight, 1, 6, 1.5, 5)",
+        width: "mapData(weight, 1, 6, 1.4, 4.5)",
         "line-color": muted,
+        "line-opacity": 0.75,
         "target-arrow-color": muted,
         "target-arrow-shape": "triangle",
+        "arrow-scale": 0.8,
         "curve-style": "bezier",
         label: "data(label)",
         "font-size": 9,
@@ -74,6 +103,8 @@ function stylesheet(): StylesheetJson {
         "text-background-color": surface,
         "text-background-opacity": 0.85,
         "text-background-padding": "1px",
+        "transition-property": "opacity",
+        "transition-duration": 150,
       },
     },
     { selector: 'edge[temporal_state = "historical"]', style: { "line-style": "dashed", opacity: 0.55 } },
@@ -83,13 +114,15 @@ function stylesheet(): StylesheetJson {
     { selector: 'edge[kind = "supersedes"]', style: { "line-style": "dashed", "line-color": accent, "target-arrow-color": accent } },
     { selector: 'edge[kind = "conflicts_with"]', style: { "line-color": warn, "target-arrow-shape": "none", width: 2 } },
     { selector: 'edge[kind = "duplicate_of"]', style: { "line-style": "dotted", "line-color": muted } },
-    // Phase 15: a highlighted path (drawn on top; everything else fades). Redundant
-    // with the textual path in the side panel -- colour is never the only cue.
+    // A highlighted path (drawn on top; everything else fades). Redundant with the textual
+    // path in the side panel -- colour is never the only cue.
     { selector: "node.path", style: { "border-color": accent, "border-width": 4, "z-index": 9 } },
     { selector: "edge.path", style: { "line-color": accent, "target-arrow-color": accent, width: 5, opacity: 1, "z-index": 9 } },
     { selector: ".faded", style: { opacity: 0.25 } },
+    // Focus: the selected node's neighbourhood stays prominent, the rest recedes.
+    { selector: ".dim", style: { opacity: 0.22 } },
     { selector: ":selected", style: { "border-color": accent, "border-width": 4, "line-color": accent, "target-arrow-color": accent, "z-index": 10 } },
-  ];
+  ] as StylesheetJson;
 }
 
 export function CytoscapeCanvas({
@@ -164,20 +197,44 @@ export function CytoscapeCanvas({
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.elements().unselect();
+    cy.elements().unselect().removeClass("dim");
     if (selection) {
       const el = cy.getElementById(selection.id);
-      if (el.nonempty()) el.select();
+      if (el.nonempty()) {
+        el.select();
+        if (selection.type === "node") cy.elements().difference(el.closedNeighborhood()).addClass("dim");
+      }
     }
-  }, [selection]);
+  }, [selection, elements]);
+
+  // Re-read the colour tokens when the OS theme changes.
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => cyRef.current?.style(stylesheet());
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  const zoomBy = (factor: number) => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.zoom({ level: Math.min(3, Math.max(0.15, cy.zoom() * factor)), renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+  };
 
   return (
-    <div
-      ref={container}
-      role="img"
-      aria-label="Graph canvas. Use the list view for a keyboard-accessible version of the same data."
-      className="h-full min-h-[420px] w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
-    />
+    <div className="relative h-full min-h-[420px] w-full">
+      <div
+        ref={container}
+        role="img"
+        aria-label="Graph canvas. Use the list view for a keyboard-accessible version of the same data."
+        className="dotgrid h-full min-h-[420px] w-full rounded-[var(--radius-panel)] border border-[var(--color-border)]"
+      />
+      <div role="group" aria-label="Zoom" className="glass absolute bottom-3 left-3 flex overflow-hidden text-sm">
+        <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1.3)} className="px-3 py-1.5 hover:bg-[var(--color-surface-2)]">+</button>
+        <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.3)} className="border-x border-[var(--color-border)] px-3 py-1.5 hover:bg-[var(--color-surface-2)]">−</button>
+        <button type="button" aria-label="Fit to view" onClick={() => cyRef.current?.fit(undefined, 30)} className="px-3 py-1.5 hover:bg-[var(--color-surface-2)]">Fit</button>
+      </div>
+    </div>
   );
 }
 

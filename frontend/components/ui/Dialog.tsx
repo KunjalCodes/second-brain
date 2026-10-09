@@ -18,7 +18,7 @@ export function Dialog({ open, onClose, title, children }: { open: boolean; onCl
       ref={ref}
       onClose={onClose}
       aria-labelledby="dialog-title"
-      className="m-auto w-[min(560px,92vw)] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-0 text-[var(--color-fg)]"
+      className="m-auto w-[min(560px,92vw)] panel p-0 text-[var(--color-fg)]"
     >
       {open ? (
         <div className="p-5">

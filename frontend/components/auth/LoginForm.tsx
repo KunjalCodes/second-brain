@@ -51,7 +51,7 @@ export function LoginForm() {
     <form
       onSubmit={onSubmit}
       aria-labelledby="login-title"
-      className="w-full max-w-sm space-y-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6"
+      className="w-full max-w-sm space-y-4 panel p-6"
     >
       <div>
         <h1 id="login-title" className="text-lg font-semibold">

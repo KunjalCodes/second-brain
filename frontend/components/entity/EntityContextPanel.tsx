@@ -24,7 +24,7 @@ export function EntityContextPanel({ entityId }: { entityId: string }) {
     queryFn: ({ signal }) => getEntityContext(entityId, asOf ?? undefined, signal),
   });
   return (
-    <section aria-labelledby="context-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <section aria-labelledby="context-title" className="panel p-4">
       <h2 id="context-title" className="mb-2 font-semibold">At a glance</h2>
       {q.isPending ? (
         <LoadingRows rows={2} label="Loading context" />

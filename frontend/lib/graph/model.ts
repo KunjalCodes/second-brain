@@ -7,6 +7,7 @@
  * No temporal logic, identity resolution or budget policy lives here.
  */
 import type { GraphPath, GraphSlice, GraphSliceEdge, GraphSliceNode } from "@/lib/api/types";
+import { kindOf } from "@/lib/format/glyphs";
 
 /** Beyond this many canvas elements the UI asks the user to re-root (plan §21). */
 export const CANVAS_ELEMENT_CAP = 600;
@@ -120,11 +121,16 @@ export interface CyElement {
 export function toElements(state: GraphState): CyElement[] {
   const out: CyElement[] = [];
   for (const n of state.nodes.values()) {
+    const kind = kindOf(n.kind, n.entity_type);
+    const label = n.kind === "memory" ? truncateLabel(n.label, 40) : n.label;
     out.push({
       group: "nodes",
       data: {
         id: n.id,
-        label: n.kind === "memory" ? truncateLabel(n.label, 40) : n.label,
+        label,
+        // Presentation only: a glyph + the text label, and a tone for the stylesheet.
+        display: `${kind.glyph} ${label}`,
+        tone: kind.tone,
         kind: n.kind,
         entity_type: n.entity_type ?? "",
         status: n.status ?? "",

@@ -141,7 +141,7 @@ export function ProvenancePanel({ memoryId, conflictsWith = [] }: { memoryId: st
     staleTime: 5 * 60_000,
   });
   return (
-    <section aria-labelledby="provenance-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <section aria-labelledby="provenance-title" className="panel p-4">
       <h2 id="provenance-title" className="mb-2 font-semibold">
         Why the AI remembers this
       </h2>

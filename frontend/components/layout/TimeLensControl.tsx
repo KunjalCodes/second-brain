@@ -6,8 +6,9 @@ import { formatDateTime, isoToLocalInput, localInputToIso } from "@/lib/format/d
 export function TimeLensControl() {
   const { asOf, setAsOf } = useTimeLens();
   return (
-    <fieldset className="flex items-center gap-2 text-sm">
+    <fieldset className="flex flex-wrap items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm">
       <legend className="sr-only">Time lens</legend>
+      <span aria-hidden="true" className="text-[var(--color-accent)]">◷</span>
       <label className="inline-flex items-center gap-1">
         <input type="radio" name="lens" checked={asOf === null} onChange={() => setAsOf(null)} /> Now
       </label>
@@ -29,7 +30,7 @@ export function TimeLensControl() {
           const iso = localInputToIso(e.target.value);
           if (iso) setAsOf(iso);
         }}
-        className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 disabled:opacity-50"
+        className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 disabled:opacity-50"
       />
       {asOf ? (
         <span className="text-xs text-[var(--color-warn)]" role="status">

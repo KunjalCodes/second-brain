@@ -42,7 +42,7 @@ function Uploader() {
     upload.mutate(file);
   }
   return (
-    <section aria-labelledby="upload-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <section aria-labelledby="upload-title" className="panel p-4">
       <h2 id="upload-title" className="font-semibold">Upload a document</h2>
       <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
         Plain text, Markdown, or PDF with selectable text. Scanned/image-only PDFs, DOCX and web pages aren’t supported.
@@ -90,7 +90,7 @@ export function DocumentList() {
       ) : (
         <ul className="space-y-2">
           {docs.map((d) => (
-            <li key={d.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+            <li key={d.id} className="panel p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Link className="font-medium underline" href={`/documents/${d.id}`}>{d.filename}</Link>
                 <DocumentStatusChip doc={d} />

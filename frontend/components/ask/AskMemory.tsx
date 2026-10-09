@@ -14,6 +14,8 @@ import { LinkedMemory } from "@/components/memory/LinkedMemory";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Chip";
 import { ErrorState, PageHeader } from "@/components/ui/States";
+import { useTimeLens } from "@/lib/time/lens";
+import { formatDateTime } from "@/lib/format/dates";
 
 interface Turn {
   question: string;
@@ -26,6 +28,7 @@ export function terminationNotice(reason: string): string | null {
 
 export function AskMemory() {
   const queryClient = useQueryClient();
+  const { asOf } = useTimeLens();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -58,13 +61,18 @@ export function AskMemory() {
       <p className="text-sm text-[var(--color-fg-muted)]">
         Questions are saved to a conversation, and what you write may be turned into new memories. The assistant&apos;s answers are never stored as memories.
       </p>
+      <p className="text-xs text-[var(--color-fg-muted)]">
+        <span aria-hidden="true">◷ </span>
+        The assistant works out the time from your question (for example “in March”). The time lens at the top applies to the pages you browse, not to Ask.
+        {asOf ? <> (Lens is set to {formatDateTime(asOf)}.)</> : null}
+      </p>
       <ol className="space-y-4" aria-live="polite">
         {turns.map((t, i) => {
           const notice = terminationNotice(t.answer.termination_reason);
           return (
-            <li key={i} className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+            <li key={i} className="space-y-2 panel p-3">
               <p className="content-text text-sm font-medium">{t.question}</p>
-              <p className="content-text text-sm">{t.answer.message.content}</p>
+              <p className="content-text reading">{t.answer.message.content}</p>
               <div className="flex flex-wrap gap-2 text-xs">
                 <Tag>{ANSWER_CONFIDENCE[t.answer.confidence] ?? t.answer.confidence}</Tag>
                 <span>{t.answer.tool_call_count} memory lookups</span>
@@ -72,7 +80,7 @@ export function AskMemory() {
               {notice ? <p role="note" className="text-xs text-[var(--color-warn)]">{notice}</p> : null}
               {t.answer.cited_memory_ids.length ? (
                 <div>
-                  <p className="text-xs font-semibold">Based on these memories</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Evidence — memories this answer is based on</p>
                   <ul className="mt-1 space-y-1">
                     {t.answer.cited_memory_ids.map((id) => <li key={id}><LinkedMemory id={id} /></li>)}
                   </ul>

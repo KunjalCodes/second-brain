@@ -20,7 +20,7 @@ export function LoadingRows({ rows = 5, label = "Loading" }: { rows?: number; la
 
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-[var(--color-border)] p-6 text-center">
+    <div className="rounded-[var(--radius-panel)] border border-dashed border-[var(--color-border)] p-8 text-center">
       <p className="font-medium">{title}</p>
       {children ? <div className="mt-2 text-sm text-[var(--color-fg-muted)]">{children}</div> : null}
     </div>
@@ -78,7 +78,7 @@ export function ErrorState({ error, onRetry, notFound }: { error: unknown; onRet
   const { title, body } = describeError(error, notFound);
   const canRetry = onRetry && api?.status !== 404 && api?.status !== 403;
   return (
-    <div role="alert" className="rounded-lg border border-[var(--color-danger)] p-4">
+    <div role="alert" className="panel border border-[var(--color-danger)] p-4">
       <p className="font-medium text-[var(--color-danger)]">{title}</p>
       <p className="mt-1 text-sm">{body}</p>
       {api?.status === 429 && left !== null ? (
@@ -118,7 +118,7 @@ export function NotTimeFiltered() {
 export function PageHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h1 className="text-xl font-semibold">{title}</h1>
+      <h1 className="reading text-2xl font-semibold tracking-tight">{title}</h1>
       <div className="flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
