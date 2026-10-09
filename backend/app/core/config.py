@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: Providers the factory knows how to build. "fake" is deliberately included so a
 #: developer can run the whole system without any provider account.
-_KNOWN_PROVIDERS: frozenset[str] = frozenset({"fake", "gemini", "openai", "anthropic"})
+_KNOWN_PROVIDERS: frozenset[str] = frozenset({"fake", "gemini", "openai", "anthropic", "groq"})
 
 #: Embedding providers, deliberately a separate set from `_KNOWN_PROVIDERS`: an
 #: LLM provider and an embedding provider are independent choices (ADR 0009), so
@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     # provider account at all, which is what keeps the test suite free.
     llm_provider: str = "fake"
     llm_model: str = ""
+    #: Optional second provider, used only when the primary is unavailable or rate
+    #: limited (e.g. LLM_PROVIDER=groq, LLM_FALLBACK_PROVIDER=gemini). Empty = none.
+    llm_fallback_provider: str = ""
+    llm_fallback_model: str = ""
     llm_timeout_seconds: float = Field(default=30.0, gt=0)
     llm_max_retries: int = Field(default=3, ge=0, le=10)
     #: How long a background job may keep waiting out provider throttling
@@ -463,6 +467,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"LLM_PROVIDER must be one of {sorted(_KNOWN_PROVIDERS)}, got {self.llm_provider!r}"
             )
+        if self.llm_fallback_provider:
+            if self.llm_fallback_provider not in (_KNOWN_PROVIDERS - {"fake"}):
+                raise ValueError(
+                    "LLM_FALLBACK_PROVIDER must be one of "
+                    f"{sorted(_KNOWN_PROVIDERS - {'fake'})}, got {self.llm_fallback_provider!r}"
+                )
+            if self.llm_fallback_provider == self.llm_provider:
+                raise ValueError("LLM_FALLBACK_PROVIDER must differ from LLM_PROVIDER")
         if self.embedding_provider not in _KNOWN_EMBEDDING_PROVIDERS:
             raise ValueError(
                 f"EMBEDDING_PROVIDER must be one of {sorted(_KNOWN_EMBEDDING_PROVIDERS)}, "
@@ -496,10 +508,22 @@ class Settings(BaseSettings):
                 f"{' and '.join(fake)}=fake: set ALLOW_FAKE_AI=true to run with the offline "
                 "providers deliberately (e.g. staging), or configure a real provider"
             )
-        if self.llm_provider not in {"fake", "gemini"}:
+        if self.llm_provider not in {"fake", "gemini", "groq"}:
             problems.append(f"LLM_PROVIDER={self.llm_provider!r} has no adapter yet")
         if self.llm_provider == "gemini" and not (self.gemini_api_key and self.llm_model):
             problems.append("LLM_PROVIDER=gemini requires GEMINI_API_KEY and LLM_MODEL")
+        if self.llm_provider == "groq" and not (self.groq_api_key and self.llm_model):
+            problems.append("LLM_PROVIDER=groq requires GROQ_API_KEY and LLM_MODEL")
+        if self.llm_fallback_provider:
+            keys = {"gemini": self.gemini_api_key, "groq": self.groq_api_key}
+            if self.llm_fallback_provider not in keys:
+                problems.append(
+                    f"LLM_FALLBACK_PROVIDER={self.llm_fallback_provider!r} has no adapter yet"
+                )
+            elif not (keys[self.llm_fallback_provider] and self.llm_fallback_model):
+                problems.append(
+                    "LLM_FALLBACK_PROVIDER requires its API key and LLM_FALLBACK_MODEL"
+                )
         if self.embedding_provider == "gemini" and not (
             self.embedding_api_key and self.embedding_model
         ):

@@ -12,6 +12,34 @@ from app.llm.base import LLMClient
 from app.llm.fake import OfflineLLMClient
 
 
+def _build_one(
+    provider: str, model: str, settings: Settings, *, max_retries: int
+) -> LLMClient:
+    if provider == "gemini":
+        from app.llm.providers.gemini import GeminiClient
+
+        return GeminiClient(
+            api_key=settings.gemini_api_key,
+            model=model,
+            prompt_version=settings.extraction_prompt_version,
+            max_retries=max_retries,
+        )
+    if provider == "groq":
+        from app.llm.providers.groq import GroqClient
+
+        return GroqClient(
+            api_key=settings.groq_api_key,
+            model=model,
+            prompt_version=settings.extraction_prompt_version,
+            max_retries=max_retries,
+        )
+    # "openai" and "anthropic" are accepted by Settings validation (so config can
+    # name them ahead of the adapter existing) but have no adapter yet.
+    raise ConfigurationError(
+        f"No LLMClient implementation is registered for LLM_PROVIDER={provider!r} yet"
+    )
+
+
 def build_llm_client(settings: Settings | None = None) -> LLMClient:
     settings = settings or get_settings()
 
@@ -22,21 +50,26 @@ def build_llm_client(settings: Settings | None = None) -> LLMClient:
         # `FakeLLMClient` directly.
         return OfflineLLMClient()
 
-    if settings.llm_provider == "gemini":
-        from app.llm.providers.gemini import GeminiClient
-
-        return GeminiClient(
-            api_key=settings.gemini_api_key,
-            model=settings.llm_model,
-            prompt_version=settings.extraction_prompt_version,
+    fallback_provider = settings.llm_fallback_provider
+    if not fallback_provider:
+        return _build_one(
+            settings.llm_provider,
+            settings.llm_model,
+            settings,
             max_retries=settings.llm_max_retries,
         )
+    # With a fallback configured the primary fails fast (one retry) so a slow or
+    # throttled provider costs seconds, not minutes, before the fallback answers.
+    from app.llm.fallback import FallbackLLMClient
 
-    # "openai" and "anthropic" are accepted by Settings validation (so config can
-    # name them ahead of the adapter existing) but have no adapter yet.
-    raise ConfigurationError(
-        f"No LLMClient implementation is registered for LLM_PROVIDER="
-        f"{settings.llm_provider!r} yet"
+    return FallbackLLMClient(
+        _build_one(settings.llm_provider, settings.llm_model, settings, max_retries=1),
+        _build_one(
+            fallback_provider,
+            settings.llm_fallback_model,
+            settings,
+            max_retries=settings.llm_max_retries,
+        ),
     )
 
 
