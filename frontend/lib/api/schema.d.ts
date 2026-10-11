@@ -1224,7 +1224,8 @@ export interface paths {
          *     Unfinished work and failed attempts appear ONLY where they were explicitly recorded;
          *     a reason appears only where the agent stated one. `max_items` lowers every section's
          *     cap (it can never raise them); `task` biases decisions, bugs, errors and attempts
-         *     toward a topic; `session_id` resumes a specific session instead of the latest.
+         *     toward a topic; `session_id` resumes a specific session instead of the latest;
+         *     `include_unrelated=true` also returns history not tied to the recent session chain.
          */
         get: operations["get_resume_context_projects__project_id__resume_get"];
         put?: never;
@@ -7114,6 +7115,7 @@ export interface operations {
                 session_id?: string | null;
                 task?: string | null;
                 max_items?: number | null;
+                include_unrelated?: boolean;
             };
             header?: never;
             path: {

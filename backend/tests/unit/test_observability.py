@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
+from app.core.errors import NotFoundError
 from app.core.logging import JsonFormatter, _ContextFilter
 from app.core.metrics import metrics
 from app.main import create_app
@@ -22,7 +23,15 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("INTERNAL_API_TOKEN", TOKEN)
     get_settings.cache_clear()
     metrics.reset()
-    with TestClient(create_app(), raise_server_exceptions=False) as c:
+    app = create_app()
+
+    # A deterministic `not_found` application error that needs no database or graph:
+    # CI's unit job has neither, and a real lookup would answer 5xx there.
+    @app.get("/__obs_not_found")
+    async def _not_found() -> None:
+        raise NotFoundError("Memory not found")
+
+    with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
 
@@ -81,7 +90,7 @@ def test_metrics_require_the_operator_token(client) -> None:  # noqa: ANN001
 def test_metrics_report_requests_errors_and_latency(client) -> None:  # noqa: ANN001
     client.get("/health")
     client.get("/no/such/route")
-    client.get("/memories/does-not-exist", headers={"X-User-Id": "obs-user"})
+    client.get("/__obs_not_found")
     r = client.get("/internal/metrics", headers={"X-Internal-Token": TOKEN})
     assert r.status_code == 200
     body = r.json()
